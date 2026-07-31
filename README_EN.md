@@ -77,10 +77,14 @@ or keeps a persistent `caffeinate` or shell process running.
 
 Open [GitHub Releases](https://github.com/Raymond711xl/AgentAwake/releases/latest):
 
-- **Fewest steps:** download the ZIP, extract it, and double-click
-  `AgentAwake.app`.
-- **Standard installation:** download the DMG, drag the app to Applications,
-  and double-click it.
+1. Download and open `AgentAwake-x.y.z.dmg`.
+2. Double-click `AgentAwake.app` in the mounted window to use it immediately.
+3. For long-term use, drag the app to Applications, especially before enabling
+   Launch at Login.
+
+Moving the app to Applications is not required for the first run. macOS still
+shows its standard downloaded-from-the-internet confirmation once; after you
+confirm, no Terminal commands or manual deployment are needed.
 
 On its first launch, AgentAwake opens its menu bar panel once. It then remains
 in the menu bar without a Dock icon. All three timed modes are immediately

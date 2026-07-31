@@ -78,7 +78,6 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             dist/release/AgentAwake-*.dmg \
-            dist/release/AgentAwake-*.zip \
             dist/release/AgentAwake-*.sha256 \
             --title "AgentAwake ${GITHUB_REF_NAME#v}" \
             --generate-notes

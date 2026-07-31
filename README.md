@@ -72,8 +72,12 @@ AgentAwake 是一个下载后即可使用的轻量 macOS 菜单栏工具。
 
 前往 [GitHub Releases](https://github.com/Raymond711xl/AgentAwake/releases/latest)：
 
-- **最少操作**：下载 ZIP，解压后双击 `AgentAwake.app`；
-- **标准安装**：下载 DMG，将 App 拖入“应用程序”后双击启动。
+1. 下载 `AgentAwake-x.y.z.dmg` 并双击打开；
+2. 在打开的窗口中双击 `AgentAwake.app`，即可直接使用；
+3. 如果准备长期使用，建议将 App 拖入“应用程序”，尤其是在启用“登录时启动”前。
+
+拖入“应用程序”不是首次使用的前置条件。首次启动时，macOS 仍会显示一次标准的
+“从互联网下载”安全确认；确认打开后不需要再执行终端命令或手动部署。
 
 首次启动后，AgentAwake 会自动展开一次菜单栏面板，之后只保留菜单栏图标，
 不显示 Dock 图标。三个定时模式此时已经可以使用，不需要继续配置。

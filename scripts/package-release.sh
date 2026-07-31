@@ -14,7 +14,6 @@ VERSION="$(/usr/libexec/PlistBuddy \
     -c 'Print :CFBundleShortVersionString' \
     "$INFO_PLIST")"
 DMG_PATH="$RELEASE_DIR/AgentAwake-$VERSION.dmg"
-ZIP_PATH="$RELEASE_DIR/AgentAwake-$VERSION.zip"
 CHECKSUM_PATH="$RELEASE_DIR/AgentAwake-$VERSION.sha256"
 
 if [[ -z "$SIGNING_IDENTITY" ]]; then
@@ -78,15 +77,6 @@ fi
     --wait
 /usr/bin/xcrun stapler staple "$DMG_PATH"
 /usr/bin/xcrun stapler validate "$DMG_PATH"
-/usr/bin/xcrun stapler staple "$APP_DIR"
-/usr/bin/xcrun stapler validate "$APP_DIR"
-/usr/bin/ditto \
-    -c \
-    -k \
-    --sequesterRsrc \
-    --keepParent \
-    "$APP_DIR" \
-    "$ZIP_PATH"
 /usr/sbin/spctl --assess --type execute --verbose=2 "$APP_DIR"
 /usr/sbin/spctl \
     --assess \
@@ -98,14 +88,10 @@ fi
 
 (
     cd "$RELEASE_DIR"
-    /usr/bin/shasum -a 256 \
-        "${DMG_PATH:t}" \
-        "${ZIP_PATH:t}" \
-        > "${CHECKSUM_PATH:t}"
+    /usr/bin/shasum -a 256 "${DMG_PATH:t}" > "${CHECKSUM_PATH:t}"
 )
 
 /bin/rm -rf "$STAGING_DIR"
 
 echo "$DMG_PATH"
-echo "$ZIP_PATH"
 echo "$CHECKSUM_PATH"

@@ -21,8 +21,8 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
   In-app settings for the login item and optional Codex/Claude Hooks.
 - 首次启动自动展示菜单栏面板；定时模式无需任何 Agent 或额外配置。
   First launch reveals the menu bar panel; timed modes need no agent or setup.
-- Developer ID 签名、Apple 公证、DMG/ZIP 制作和 GitHub Release 自动化。
-  Developer ID signing, notarization, DMG/ZIP packaging, and release automation.
+- Developer ID 签名、Apple 公证、DMG 制作和 GitHub Release 自动化。
+  Developer ID signing, notarization, DMG packaging, and release automation.
 
 ### Changed / 变更
 
