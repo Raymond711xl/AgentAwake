@@ -22,11 +22,14 @@ if [[ "$CONFIGURATION" != "debug" && "$CONFIGURATION" != "release" ]]; then
     exit 64
 fi
 
-if [[ "$ARCHITECTURE_MODE" != "native" \
-    && "$ARCHITECTURE_MODE" != "universal" ]]; then
-    echo "Architecture mode must be native or universal." >&2
-    exit 64
-fi
+case "$ARCHITECTURE_MODE" in
+    native|universal|arm64|x86_64)
+        ;;
+    *)
+        echo "Architecture mode must be native, universal, arm64, or x86_64." >&2
+        exit 64
+        ;;
+esac
 
 if [[ ! -f "$APP_ICON" ]]; then
     "$PROJECT_DIR/scripts/build-icon.sh"
@@ -53,6 +56,18 @@ build_for_architecture() {
         --show-bin-path
 }
 
+copy_executables_from_directory() {
+    local source_directory="$1"
+
+    /bin/cp "$source_directory/AgentAwake" "$MACOS_DIR/AgentAwake"
+    /bin/cp \
+        "$source_directory/AgentAwakeHook" \
+        "$HELPERS_DIR/AgentAwakeHook"
+    /bin/cp \
+        "$source_directory/AgentAwakeHookSetup" \
+        "$HELPERS_DIR/AgentAwakeHookSetup"
+}
+
 /bin/rm -rf "$APP_DIR"
 /bin/mkdir -p "$MACOS_DIR" "$HELPERS_DIR" "$RESOURCES_DIR"
 
@@ -71,18 +86,17 @@ if [[ "$ARCHITECTURE_MODE" == "universal" ]]; then
             "$X86_64_BIN_DIR/$executable" \
             -output "$destination"
     done
+elif [[ "$ARCHITECTURE_MODE" == "arm64" \
+    || "$ARCHITECTURE_MODE" == "x86_64" ]]; then
+    ARCHITECTURE_BIN_DIR="$(build_for_architecture "$ARCHITECTURE_MODE")"
+    copy_executables_from_directory "$ARCHITECTURE_BIN_DIR"
 else
     /usr/bin/swift build \
         --package-path "$PROJECT_DIR" \
         --configuration "$CONFIGURATION" \
         --disable-sandbox
     NATIVE_BIN_DIR="$PROJECT_DIR/.build/$CONFIGURATION"
-
-    /bin/cp "$NATIVE_BIN_DIR/AgentAwake" "$MACOS_DIR/AgentAwake"
-    /bin/cp "$NATIVE_BIN_DIR/AgentAwakeHook" "$HELPERS_DIR/AgentAwakeHook"
-    /bin/cp \
-        "$NATIVE_BIN_DIR/AgentAwakeHookSetup" \
-        "$HELPERS_DIR/AgentAwakeHookSetup"
+    copy_executables_from_directory "$NATIVE_BIN_DIR"
 fi
 
 /bin/cp "$PROJECT_DIR/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"

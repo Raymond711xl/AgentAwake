@@ -21,16 +21,12 @@ jobs:
       - name: Run self-test
         run: swift run --disable-sandbox AgentAwakeSelfTest
 
-      - name: Build Universal 2 app
-        run: ./scripts/build-app.sh release universal
+      - name: Build architecture-specific release images
+        run: ./scripts/package-release.sh
 
-      - name: Verify bundle and architectures
+      - name: Verify release images and checksums
         run: |
-          codesign --verify --deep --strict --verbose=2 dist/AgentAwake.app
-          for executable in \
-            dist/AgentAwake.app/Contents/MacOS/AgentAwake \
-            dist/AgentAwake.app/Contents/Helpers/AgentAwakeHook \
-            dist/AgentAwake.app/Contents/Helpers/AgentAwakeHookSetup; do
-            lipo -archs "$executable" | grep -q arm64
-            lipo -archs "$executable" | grep -q x86_64
-          done
+          test -f dist/release/AgentAwake-*-Apple-Silicon.dmg
+          test -f dist/release/AgentAwake-*-Intel.dmg
+          cd dist/release
+          shasum -a 256 -c AgentAwake-*.sha256

@@ -5,93 +5,64 @@ set -euo pipefail
 PROJECT_DIR="${0:A:h:h}"
 APP_DIR="$PROJECT_DIR/dist/AgentAwake.app"
 RELEASE_DIR="$PROJECT_DIR/dist/release"
-STAGING_DIR="$PROJECT_DIR/dist/dmg-staging"
+STAGING_ROOT="$PROJECT_DIR/dist/dmg-staging"
 INFO_PLIST="$PROJECT_DIR/Resources/Info.plist"
-SIGNING_IDENTITY="${DEVELOPER_ID_APPLICATION:-}"
-NOTARY_PROFILE="${NOTARY_KEYCHAIN_PROFILE:-}"
-NOTARY_KEYCHAIN_PATH="${NOTARY_KEYCHAIN:-}"
 VERSION="$(/usr/libexec/PlistBuddy \
     -c 'Print :CFBundleShortVersionString' \
     "$INFO_PLIST")"
-DMG_PATH="$RELEASE_DIR/AgentAwake-$VERSION.dmg"
+APPLE_SILICON_DMG="$RELEASE_DIR/AgentAwake-$VERSION-Apple-Silicon.dmg"
+INTEL_DMG="$RELEASE_DIR/AgentAwake-$VERSION-Intel.dmg"
 CHECKSUM_PATH="$RELEASE_DIR/AgentAwake-$VERSION.sha256"
 
-if [[ -z "$SIGNING_IDENTITY" ]]; then
-    echo "DEVELOPER_ID_APPLICATION is required for a public release." >&2
-    exit 78
-fi
+package_architecture() {
+    local architecture="$1"
+    local dmg_path="$2"
+    local staging_directory="$STAGING_ROOT/$architecture"
 
-if [[ -z "$NOTARY_PROFILE" ]]; then
-    echo "NOTARY_KEYCHAIN_PROFILE is required for a public release." >&2
-    exit 78
-fi
+    "$PROJECT_DIR/scripts/build-app.sh" release "$architecture"
+    /usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_DIR"
 
-"$PROJECT_DIR/scripts/build-app.sh" release universal
+    for executable in \
+        "$APP_DIR/Contents/MacOS/AgentAwake" \
+        "$APP_DIR/Contents/Helpers/AgentAwakeHook" \
+        "$APP_DIR/Contents/Helpers/AgentAwakeHookSetup"; do
+        actual_architecture="$(/usr/bin/lipo -archs "$executable")"
+        if [[ "$actual_architecture" != "$architecture" ]]; then
+            echo "Expected $architecture but found $actual_architecture: $executable" >&2
+            exit 65
+        fi
+    done
 
-for helper in \
-    "$APP_DIR/Contents/Helpers/AgentAwakeHook" \
-    "$APP_DIR/Contents/Helpers/AgentAwakeHookSetup"; do
-    /usr/bin/codesign \
-        --force \
-        --options runtime \
-        --timestamp \
-        --sign "$SIGNING_IDENTITY" \
-        "$helper"
-done
+    /bin/rm -rf "$staging_directory"
+    /bin/mkdir -p "$staging_directory"
+    /usr/bin/ditto "$APP_DIR" "$staging_directory/AgentAwake.app"
+    /bin/ln -s /Applications "$staging_directory/Applications"
 
-/usr/bin/codesign \
-    --force \
-    --options runtime \
-    --timestamp \
-    --sign "$SIGNING_IDENTITY" \
-    "$APP_DIR"
+    /usr/bin/hdiutil create \
+        -volname "AgentAwake" \
+        -srcfolder "$staging_directory" \
+        -ov \
+        -format UDZO \
+        "$dmg_path"
+    /usr/bin/hdiutil verify "$dmg_path"
+}
 
-/usr/bin/codesign --verify --deep --strict --verbose=2 "$APP_DIR"
+/bin/rm -rf "$RELEASE_DIR" "$STAGING_ROOT"
+/bin/mkdir -p "$RELEASE_DIR" "$STAGING_ROOT"
 
-/bin/rm -rf "$RELEASE_DIR" "$STAGING_DIR"
-/bin/mkdir -p "$RELEASE_DIR" "$STAGING_DIR"
-/usr/bin/ditto "$APP_DIR" "$STAGING_DIR/AgentAwake.app"
-/bin/ln -s /Applications "$STAGING_DIR/Applications"
-
-/usr/bin/hdiutil create \
-    -volname "AgentAwake" \
-    -srcfolder "$STAGING_DIR" \
-    -ov \
-    -format UDZO \
-    "$DMG_PATH"
-
-/usr/bin/codesign \
-    --force \
-    --timestamp \
-    --sign "$SIGNING_IDENTITY" \
-    "$DMG_PATH"
-
-NOTARY_ARGUMENTS=(--keychain-profile "$NOTARY_PROFILE")
-if [[ -n "$NOTARY_KEYCHAIN_PATH" ]]; then
-    NOTARY_ARGUMENTS+=(--keychain "$NOTARY_KEYCHAIN_PATH")
-fi
-
-/usr/bin/xcrun notarytool submit \
-    "$DMG_PATH" \
-    "${NOTARY_ARGUMENTS[@]}" \
-    --wait
-/usr/bin/xcrun stapler staple "$DMG_PATH"
-/usr/bin/xcrun stapler validate "$DMG_PATH"
-/usr/sbin/spctl --assess --type execute --verbose=2 "$APP_DIR"
-/usr/sbin/spctl \
-    --assess \
-    --type open \
-    --context context:primary-signature \
-    --verbose=2 \
-    "$DMG_PATH"
-/usr/bin/hdiutil verify "$DMG_PATH"
+package_architecture arm64 "$APPLE_SILICON_DMG"
+package_architecture x86_64 "$INTEL_DMG"
 
 (
     cd "$RELEASE_DIR"
-    /usr/bin/shasum -a 256 "${DMG_PATH:t}" > "${CHECKSUM_PATH:t}"
+    /usr/bin/shasum -a 256 \
+        "${APPLE_SILICON_DMG:t}" \
+        "${INTEL_DMG:t}" \
+        > "${CHECKSUM_PATH:t}"
 )
 
-/bin/rm -rf "$STAGING_DIR"
+/bin/rm -rf "$STAGING_ROOT"
 
-echo "$DMG_PATH"
+echo "$APPLE_SILICON_DMG"
+echo "$INTEL_DMG"
 echo "$CHECKSUM_PATH"

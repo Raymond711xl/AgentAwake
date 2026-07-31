@@ -72,19 +72,25 @@ AgentAwake 是一个下载后即可使用的轻量 macOS 菜单栏工具。
 
 前往 [GitHub Releases](https://github.com/Raymond711xl/AgentAwake/releases/latest)：
 
-1. 下载 `AgentAwake-x.y.z.dmg` 并双击打开；
-2. 在打开的窗口中双击 `AgentAwake.app`，即可直接使用；
-3. 如果准备长期使用，建议将 App 拖入“应用程序”，尤其是在启用“登录时启动”前。
+1. 按本机芯片下载对应文件：
+   - M1、M2、M3、M4 等苹果芯片：`AgentAwake-x.y.z-Apple-Silicon.dmg`；
+   - Intel 芯片：`AgentAwake-x.y.z-Intel.dmg`。
+2. 双击 DMG，在打开的窗口中双击 `AgentAwake.app` 即可使用；如果准备长期使用，
+   建议先将 App 拖入“应用程序”，尤其是在启用“登录时启动”前。
 
-拖入“应用程序”不是首次使用的前置条件。首次启动时，macOS 仍会显示一次标准的
-“从互联网下载”安全确认；确认打开后不需要再执行终端命令或手动部署。
+如果不知道芯片类型，点击苹果菜单  →“关于本机”，查看“芯片”或“处理器”。
+
+> **首次打开被 macOS 阻止时：**先尝试双击一次并关闭提示，然后打开
+> “系统设置 → 隐私与安全性”，向下滚动，在 AgentAwake 提示旁点击“仍要打开”，
+> 再确认“打开”（可能需要输入登录密码）。这只需操作一次，以后可以直接双击。
+> 本版本采用 ad-hoc 签名，因此不会显示已验证的 Apple 开发者身份；不需要终端命令。
 
 首次启动后，AgentAwake 会自动展开一次菜单栏面板，之后只保留菜单栏图标，
 不显示 Dock 图标。三个定时模式此时已经可以使用，不需要继续配置。
 
 ### 2. 选择保护模式
 
-1. 点击菜单栏中的星星与三个 `Z` 图标。
+1. 点击菜单栏中的四角十字星与单个 `Z` 图标。
 2. 拖动滑块选择 30 分钟、1 小时、2 小时或 Agent。
 3. 需要立即停止时，把滑块拖回“未开启”；临时断言会马上释放。
 
@@ -162,11 +168,10 @@ app-server、sandbox 和流式进程可能长期常驻。
 
 从源码构建需要 Swift 工具链；安装 Xcode Command Line Tools 即可。
 
-构建 Universal 2 App：
+构建 Apple Silicon 与 Intel 发布镜像：
 
 ```bash
-./scripts/build-app.sh release universal
-open dist/AgentAwake.app
+./scripts/package-release.sh
 ```
 
 运行零依赖自检：
@@ -193,7 +198,7 @@ Sources/AgentAwakeHook/      单次生命周期 Hook helper
 Sources/AgentAwakeHookSetup/ Hooks 安装与卸载
 Resources/                   Info.plist 与 APP 图标
 scripts/                     App 和图标构建脚本
-docs/RELEASING.md            正式签名、公证与 GitHub Release 流程
+docs/RELEASING.md            双架构 DMG 与 GitHub Release 流程
 ```
 
 ## 当前边界

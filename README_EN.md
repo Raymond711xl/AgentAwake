@@ -77,14 +77,21 @@ or keeps a persistent `caffeinate` or shell process running.
 
 Open [GitHub Releases](https://github.com/Raymond711xl/AgentAwake/releases/latest):
 
-1. Download and open `AgentAwake-x.y.z.dmg`.
-2. Double-click `AgentAwake.app` in the mounted window to use it immediately.
-3. For long-term use, drag the app to Applications, especially before enabling
-   Launch at Login.
+1. Download the image for your Mac:
+   - Apple M1, M2, M3, M4, or later: `AgentAwake-x.y.z-Apple-Silicon.dmg`.
+   - Intel processor: `AgentAwake-x.y.z-Intel.dmg`.
+2. Open the DMG and double-click `AgentAwake.app`. For long-term use, drag the
+   app to Applications first, especially before enabling Launch at Login.
 
-Moving the app to Applications is not required for the first run. macOS still
-shows its standard downloaded-from-the-internet confirmation once; after you
-confirm, no Terminal commands or manual deployment are needed.
+To check your processor, open Apple menu  → About This Mac and look for Chip
+or Processor.
+
+> **If macOS blocks the first launch:** try opening AgentAwake once and dismiss
+> the warning. Open System Settings → Privacy & Security, scroll down, click
+> Open Anyway beside AgentAwake, then confirm Open. macOS may ask for your login
+> password. This is a one-time exception; future launches work normally.
+> This release uses ad-hoc signing and does not show a verified Apple developer.
+> No Terminal command is required.
 
 On its first launch, AgentAwake opens its menu bar panel once. It then remains
 in the menu bar without a Dock icon. All three timed modes are immediately
@@ -92,7 +99,7 @@ available and require no further setup.
 
 ### 2. Choose a protection mode
 
-1. Click the star-and-three-`Z` icon in the menu bar.
+1. Click the four-point sparkle-and-`Z` icon in the menu bar.
 2. Drag the slider to 30 minutes, 1 hour, 2 hours, or Agent.
 3. To stop immediately, drag it back to Off (`未开启`); the temporary power
    assertions are released at once.
@@ -181,11 +188,10 @@ automatically.
 Source builds require a Swift toolchain; Xcode Command Line Tools are
 sufficient.
 
-Build the Universal 2 app:
+Build the Apple silicon and Intel release images:
 
 ```bash
-./scripts/build-app.sh release universal
-open dist/AgentAwake.app
+./scripts/package-release.sh
 ```
 
 Run the dependency-free self-test:
@@ -212,7 +218,7 @@ Sources/AgentAwakeHook/      One-shot lifecycle Hook helper
 Sources/AgentAwakeHookSetup/ Hook installer and uninstaller
 Resources/                   Info.plist and app icon
 scripts/                     App and icon build scripts
-docs/RELEASING.md            Signing, notarization, and GitHub Release workflow
+docs/RELEASING.md            Dual-architecture DMG and GitHub Release workflow
 ```
 
 ## Current scope

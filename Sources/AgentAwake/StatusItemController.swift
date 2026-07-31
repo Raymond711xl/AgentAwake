@@ -1,6 +1,12 @@
 import AppKit
 import SwiftUI
 
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+}
+
 @MainActor
 final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
@@ -15,7 +21,7 @@ final class StatusItemController: NSObject {
         self.appController = appController
         self.onOpenSettings = onOpenSettings
         self.statusItem = NSStatusBar.system.statusItem(
-            withLength: 31
+            withLength: NSStatusItem.squareLength
         )
         self.popover = NSPopover()
         super.init()
@@ -45,7 +51,7 @@ final class StatusItemController: NSObject {
         popover.behavior = .transient
         popover.animates = true
         popover.contentSize = NSSize(width: 340, height: 290)
-        popover.contentViewController = NSHostingController(
+        let hostingView = FirstMouseHostingView(
             rootView: StatusPopoverView(
                 appController: appController,
                 onOpenSettings: { [weak self] in
@@ -54,6 +60,9 @@ final class StatusItemController: NSObject {
                 }
             )
         )
+        let contentViewController = NSViewController()
+        contentViewController.view = hostingView
+        popover.contentViewController = contentViewController
     }
 
     private func updateStatusIcon() {

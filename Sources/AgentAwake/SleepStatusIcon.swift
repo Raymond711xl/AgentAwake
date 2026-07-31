@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 enum SleepStatusIcon {
-    static let menuBarSize = NSSize(width: 27, height: 18)
+    static let menuBarSize = NSSize(width: 18, height: 18)
 
     static func makeImage(
         color: NSColor,
@@ -29,7 +29,7 @@ enum SleepStatusIcon {
                 accessibilityDescription: nil
             )?.withSymbolConfiguration(symbolConfiguration) {
                 sparkle.draw(
-                    in: NSRect(x: 0, y: 3, width: 13, height: 13),
+                    in: NSRect(x: 0, y: 4, width: 13, height: 13),
                     from: .zero,
                     operation: .sourceOver,
                     fraction: 1,
@@ -38,26 +38,21 @@ enum SleepStatusIcon {
                 )
             }
 
-            let zPositions: [
-                (point: NSPoint, size: CGFloat)
-            ] = [
-                (NSPoint(x: 12.5, y: 9.5), 5.5),
-                (NSPoint(x: 17, y: 5), 6.5),
-                (NSPoint(x: 22, y: 0), 7.5)
+            let zAttributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 7.5, weight: .medium),
+                .foregroundColor: color
             ]
-
-            for position in zPositions {
-                let attributes: [NSAttributedString.Key: Any] = [
-                    .font: NSFont.systemFont(
-                        ofSize: position.size,
-                        weight: .semibold
-                    ),
-                    .foregroundColor: color
-                ]
+            if let context = NSGraphicsContext.current {
+                context.saveGraphicsState()
+                let transform = NSAffineTransform()
+                transform.translateX(by: 10.25, yBy: 0.75)
+                transform.rotate(byDegrees: -8)
+                transform.concat()
                 ("Z" as NSString).draw(
-                    at: position.point,
-                    withAttributes: attributes
+                    at: .zero,
+                    withAttributes: zAttributes
                 )
+                context.restoreGraphicsState()
             }
 
             return true
@@ -73,7 +68,9 @@ struct SleepStatusMark: View {
     let isActive: Bool
 
     private var markColor: Color {
-        isActive ? .primary : .secondary
+        isActive
+            ? Color(red: 0.85, green: 0.47, blue: 0.34)
+            : .secondary
     }
 
     var body: some View {
@@ -83,20 +80,13 @@ struct SleepStatusMark: View {
                 .offset(x: 0, y: 5)
 
             Text("Z")
-                .font(.system(size: 6, weight: .semibold))
-                .offset(x: 17, y: 14)
-
-            Text("Z")
-                .font(.system(size: 7, weight: .semibold))
-                .offset(x: 23, y: 8)
-
-            Text("Z")
-                .font(.system(size: 8, weight: .semibold))
-                .offset(x: 30, y: 1)
+                .font(.system(size: 8, weight: .medium, design: .rounded))
+                .rotationEffect(.degrees(-8))
+                .offset(x: 15, y: 0)
         }
         .foregroundStyle(markColor)
-        .frame(width: 39, height: 28, alignment: .topLeading)
+        .frame(width: 28, height: 28, alignment: .topLeading)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("睡眠星标")
+        .accessibilityLabel("睡眠十字星与 Z 标记")
     }
 }

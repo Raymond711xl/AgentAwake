@@ -13,16 +13,19 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased / 未发布]
 
+## [0.4.0] - 2026-07-31
+
 ### Added / 新增
 
-- 可独立下载的 Universal 2 App 构建，覆盖 Apple Silicon 与 Intel Mac。
-  Universal 2 app builds for both Apple silicon and Intel Macs.
+- 分别提供 Apple Silicon 与 Intel Mac 的独立可下载 App 和 DMG。
+  Separate downloadable apps and DMGs for Apple silicon and Intel Macs.
 - App 内设置窗口，可选管理登录项、Codex Hooks 与 Claude Hooks。
   In-app settings for the login item and optional Codex/Claude Hooks.
 - 首次启动自动展示菜单栏面板；定时模式无需任何 Agent 或额外配置。
   First launch reveals the menu bar panel; timed modes need no agent or setup.
-- Developer ID 签名、Apple 公证、DMG 制作和 GitHub Release 自动化。
-  Developer ID signing, notarization, DMG packaging, and release automation.
+- Ad-hoc 签名、双架构 DMG 制作和无需 Apple 发布凭据的 GitHub Release 自动化。
+  Ad-hoc signing, dual-architecture DMG packaging, and GitHub Release
+  automation without Apple publishing credentials.
 
 ### Changed / 变更
 
@@ -30,6 +33,18 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
   本机已检测到的 Agent 配置。
   Hooks are now optional settings and only modify explicitly selected,
   locally detected agent configurations.
+- 五档滑轨加入悬停光晕、加大的圆形把手、加粗轨道和带触觉反馈的弹性吸附。
+  The five-position slider now has a hover glow, a larger circular thumb,
+  a thicker track, haptic feedback, and spring-loaded snapping.
+- 修复菜单栏面板首次显示时，第一次拖拽只激活窗口而不会移动滑块的问题。
+  Fixed the first drag being consumed by window activation when the menu bar
+  popover is shown for the first time.
+- 菜单栏与 App 内标记统一为四角十字星和单个左倾 `Z`，并将状态栏占位收为方形。
+  The menu bar and in-app marks now share a four-point sparkle with one
+  left-leaning `Z`, while the status item uses a compact square footprint.
+- APP 图标同步换为暖陶土橙配色的四角十字星与单 `Z` 版本。
+  The app icon now uses the same four-point sparkle and single `Z` in a warm
+  clay-orange palette.
 
 ## [0.3.1] - 2026-07-31
 

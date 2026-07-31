@@ -182,8 +182,12 @@ struct StatusPopoverView: View {
             )
             .foregroundStyle(
                 appController.selectedMode == mode
-                    ? Color.primary
+                    ? Color.accentColor
                     : Color.secondary
+            )
+            .animation(
+                .easeOut(duration: 0.16),
+                value: appController.selectedMode
             )
     }
 
