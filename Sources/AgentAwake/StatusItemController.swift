@@ -6,9 +6,14 @@ final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let appController: AppController
+    private let onOpenSettings: () -> Void
 
-    init(appController: AppController) {
+    init(
+        appController: AppController,
+        onOpenSettings: @escaping () -> Void
+    ) {
         self.appController = appController
+        self.onOpenSettings = onOpenSettings
         self.statusItem = NSStatusBar.system.statusItem(
             withLength: 31
         )
@@ -41,7 +46,13 @@ final class StatusItemController: NSObject {
         popover.animates = true
         popover.contentSize = NSSize(width: 340, height: 290)
         popover.contentViewController = NSHostingController(
-            rootView: StatusPopoverView(appController: appController)
+            rootView: StatusPopoverView(
+                appController: appController,
+                onOpenSettings: { [weak self] in
+                    self?.popover.performClose(nil)
+                    self?.onOpenSettings()
+                }
+            )
         )
     }
 
@@ -78,10 +89,10 @@ final class StatusItemController: NSObject {
             return
         }
 
-        showPopover()
+        presentPopover()
     }
 
-    private func showPopover() {
+    func presentPopover() {
         guard let button = statusItem.button else {
             return
         }

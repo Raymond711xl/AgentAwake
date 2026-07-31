@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run self-test
+        run: swift run --disable-sandbox AgentAwakeSelfTest
+
+      - name: Build Universal 2 app
+        run: ./scripts/build-app.sh release universal
+
+      - name: Verify bundle and architectures
+        run: |
+          codesign --verify --deep --strict --verbose=2 dist/AgentAwake.app
+          for executable in \
+            dist/AgentAwake.app/Contents/MacOS/AgentAwake \
+            dist/AgentAwake.app/Contents/Helpers/AgentAwakeHook \
+            dist/AgentAwake.app/Contents/Helpers/AgentAwakeHookSetup; do
+            lipo -archs "$executable" | grep -q arm64
+            lipo -archs "$executable" | grep -q x86_64
+          done

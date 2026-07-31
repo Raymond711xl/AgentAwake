@@ -14,12 +14,16 @@
 </p>
 
 <p align="center">
-  macOS 13+ · Swift · 当前版本 0.3.1
+  macOS 13+ · Apple Silicon / Intel · 当前版本 0.4.0
+</p>
+
+<p align="center">
+  <a href="https://github.com/Raymond711xl/AgentAwake/releases/latest">下载最新版本</a>
 </p>
 
 ## 软件介绍
 
-AgentAwake 是一个为 Codex 和 Claude 长任务设计的轻量 macOS 菜单栏工具。
+AgentAwake 是一个下载后即可使用的轻量 macOS 菜单栏工具。
 当定时保护开启或 Agent 正在工作时，它通过带超时保护的 macOS IOKit
 临时电源断言阻止空闲休眠；任务结束、倒计时结束、手动关闭或退出 App 后，
 它会立即释放断言，把休眠控制权交还给系统。
@@ -35,6 +39,8 @@ AgentAwake 是一个为 Codex 和 Claude 长任务设计的轻量 macOS 菜单�
   保持系统和显示器唤醒。
 - **Hooks 优先、日志兜底**：优先使用生命周期 Hooks 获取及时状态；未安装 Hooks
   时，自动增量读取本地任务日志作为零配置兜底，不依赖可能长期常驻的进程名。
+- **下载后直接使用**：普通用户不需要 Codex、Cloud、Xcode、Swift 或终端；
+  Hooks 与登录项等增强能力都在设置中按需启用。
 - **自动释放与续租**：Agent 模式使用 120 秒短租约，每 60 秒续期；最后一个
   Agent 结束 5 秒后自动释放，异常失联的状态也会过期。
 - **安全的临时断言**：固定时长和 Agent 模式均使用带超时的 IOKit 断言，
@@ -57,24 +63,20 @@ AgentAwake 是一个为 Codex 和 Claude 长任务设计的轻量 macOS 菜单�
 ## 系统要求
 
 - macOS 13 Ventura 或更高版本
-- 从源码构建时需要 Swift 工具链；安装 Xcode Command Line Tools 即可
+- 支持 Apple Silicon 与 Intel Mac
 - 当前菜单栏界面为简体中文
 
 ## 使用方法
 
-### 1. 构建并启动
+### 1. 下载并启动
 
-进入仓库目录后运行：
+前往 [GitHub Releases](https://github.com/Raymond711xl/AgentAwake/releases/latest)：
 
-```bash
-chmod +x scripts/build-app.sh scripts/build-icon.sh
-./scripts/build-app.sh
-open dist/AgentAwake.app
-```
+- **最少操作**：下载 ZIP，解压后双击 `AgentAwake.app`；
+- **标准安装**：下载 DMG，将 App 拖入“应用程序”后双击启动。
 
-构建脚本会生成并临时签名 `dist/AgentAwake.app`，同时把 APP 图标、主程序和
-Hooks helper 打包进去。首次启动后，AgentAwake 只出现在菜单栏，不显示 Dock
-图标。
+首次启动后，AgentAwake 会自动展开一次菜单栏面板，之后只保留菜单栏图标，
+不显示 Dock 图标。三个定时模式此时已经可以使用，不需要继续配置。
 
 ### 2. 选择保护模式
 
@@ -85,15 +87,20 @@ Hooks helper 打包进去。首次启动后，AgentAwake 只出现在菜单栏�
 固定时长模式会立即开始倒计时。Agent 模式在没有任务时只等待，
 检测到 Codex 或 Claude 工作后才接管休眠。
 
-### 3. 安装 Agent Hooks（推荐）
+### 3. 可选设置
 
-先完成 App 构建，再运行幂等安装器：
+点击菜单栏面板底部的“设置”，可以按需管理：
 
-```bash
-./dist/AgentAwake.app/Contents/Helpers/AgentAwakeHookSetup install
-```
+- 登录时启动；
+- Codex Hooks；
+- Claude Hooks。
 
-安装器会：
+Agent 模式默认读取本机已有的 Codex 与 Claude 活动记录，因此 Hooks 不是使用
+前置条件。设置页会标明本机检测状态，只允许为实际存在的 Agent 安装 Hooks，
+不会为未安装的软件创建配置。
+AgentAwake 不负责安装或运行大模型；相关 Agent 由用户自行配置，App 只读取
+已有的本地状态。
+用户明确点击安装后，App 才会：
 
 - 把一次性 Hook helper 安装到
   `~/Library/Application Support/AgentAwake/bin/AgentAwakeHook`；
@@ -105,14 +112,8 @@ Codex 会要求审核非托管命令 Hook。安装后在 Codex CLI 输入 `/hook
 检查命令路径并信任新增的 AgentAwake Hooks；未信任前 Codex 会跳过它们。
 Claude 的用户级设置会自动加载。
 
-不安装 Hooks 也可以使用 Agent 模式，App 会自动启用本地任务日志兜底，
-只是状态变化可能不如 Hooks 及时。
-
-移除适配器：
-
-```bash
-./dist/AgentAwake.app/Contents/Helpers/AgentAwakeHookSetup uninstall
-```
+不安装 Hooks 也可以使用 Agent 模式，只是状态变化可能不如 Hooks 及时。
+安装、修复和移除均在设置页完成，不需要终端。
 
 ## 如何确认没有修改系统设置
 
@@ -155,6 +156,15 @@ app-server、sandbox 和流式进程可能长期常驻。
 
 ## 开发与验证
 
+从源码构建需要 Swift 工具链；安装 Xcode Command Line Tools 即可。
+
+构建 Universal 2 App：
+
+```bash
+./scripts/build-app.sh release universal
+open dist/AgentAwake.app
+```
+
 运行零依赖自检：
 
 ```bash
@@ -174,14 +184,16 @@ swift run --disable-sandbox AgentAwakeSelfTest
 ```text
 Sources/AgentAwake/          菜单栏界面与 App 生命周期
 Sources/AgentAwakeCore/      保护会话、Agent 检测与 IOKit 断言
+Sources/AgentAwakeSetupCore/ 可选集成的检测、安装、修复与移除
 Sources/AgentAwakeHook/      单次生命周期 Hook helper
 Sources/AgentAwakeHookSetup/ Hooks 安装与卸载
 Resources/                   Info.plist 与 APP 图标
 scripts/                     App 和图标构建脚本
+docs/RELEASING.md            正式签名、公证与 GitHub Release 流程
 ```
 
 ## 当前边界
 
-AgentAwake 当前面向本机运行的 Codex 与 Claude，并以源码构建方式提供。
-它不是系统电源设置管理器，也不会替代 macOS 原有的睡眠策略；它只在所选窗口内
-临时延后空闲休眠。
+AgentAwake 的定时模式不依赖任何 Agent；Agent 感知模式当前支持本机运行的
+Codex 与 Claude。它不是系统电源设置管理器，也不会替代 macOS 原有的睡眠
+策略；它只在所选窗口内临时延后空闲休眠。

@@ -4,6 +4,7 @@ import SwiftUI
 
 struct StatusPopoverView: View {
     @ObservedObject var appController: AppController
+    let onOpenSettings: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -117,6 +118,13 @@ struct StatusPopoverView: View {
                 .foregroundStyle(.secondary)
 
             Spacer()
+
+            Button("设置") {
+                onOpenSettings()
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
 
             Button("退出") {
                 NSApplication.shared.terminate(nil)

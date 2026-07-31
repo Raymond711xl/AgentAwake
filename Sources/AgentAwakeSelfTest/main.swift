@@ -1,4 +1,5 @@
 import AgentAwakeCore
+import AgentAwakeSetupCore
 import Darwin
 import Foundation
 
@@ -388,10 +389,180 @@ private func testAgentActivityParsing() {
     )
 }
 
+private func testSelectiveIntegrationSetup() {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent(
+            "AgentAwakeSetupTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    defer {
+        try? fileManager.removeItem(at: root)
+    }
+
+    let codexDirectory = root.appendingPathComponent(
+        ".codex",
+        isDirectory: true
+    )
+    let sessionsDirectory = codexDirectory.appendingPathComponent(
+        "sessions",
+        isDirectory: true
+    )
+    try? fileManager.createDirectory(
+        at: sessionsDirectory,
+        withIntermediateDirectories: true
+    )
+
+    let configURL = codexDirectory.appendingPathComponent("hooks.json")
+    let originalConfig: [String: Any] = [
+        "description": "Existing user hooks",
+        "hooks": [
+            "UserPromptSubmit": [
+                [
+                    "hooks": [
+                        [
+                            "type": "command",
+                            "command": "/usr/bin/true",
+                            "timeout": 2
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
+    if let data = try? JSONSerialization.data(
+        withJSONObject: originalConfig,
+        options: [.prettyPrinted, .sortedKeys]
+    ) {
+        try? data.write(to: configURL)
+    }
+
+    let helperURL = root.appendingPathComponent("AgentAwakeHook")
+    try? Data("agentawake-test-helper".utf8).write(to: helperURL)
+    try? fileManager.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: helperURL.path
+    )
+
+    let manager = AgentIntegrationManager(
+        homeDirectory: root,
+        bundledHelperURL: helperURL
+    )
+    let initial = manager.inspect(.codex)
+    expect(initial.state == .available, "检测到 Codex 后 Hooks 应保持可选")
+    expect(initial.hasLocalActivityData, "应识别已有 Codex 活动目录")
+
+    do {
+        try manager.install(.codex)
+    } catch {
+        failures.append("Codex Hooks 安装失败：\(error.localizedDescription)")
+    }
+
+    expect(
+        manager.inspect(.codex).state == .installed,
+        "安装后 Codex Hooks 状态应为已安装"
+    )
+    expect(
+        !fileManager.fileExists(
+            atPath: root
+                .appendingPathComponent(".claude/settings.json")
+                .path
+        ),
+        "安装 Codex 集成时不应创建 Claude 配置"
+    )
+    expect(
+        fileManager.fileExists(
+            atPath: configURL.path + ".agentawake-backup"
+        ),
+        "首次修改已有配置前应创建备份"
+    )
+
+    let installedConfig = (try? String(contentsOf: configURL)) ?? ""
+    expect(
+        installedConfig.contains("usr") && installedConfig.contains("true"),
+        "安装 Hooks 时必须保留用户原有命令"
+    )
+    expect(
+        installedConfig.contains(AgentIntegrationManager.adapterID),
+        "安装后配置应包含 AgentAwake 标识"
+    )
+
+    do {
+        try manager.install(.codex)
+        let repeatedConfig = (try? String(contentsOf: configURL)) ?? ""
+        let adapterCount = repeatedConfig.components(
+            separatedBy: AgentIntegrationManager.adapterID
+        ).count - 1
+        expect(adapterCount == 6, "重复安装不应追加重复的 Codex Hooks")
+        try manager.uninstall(.codex)
+    } catch {
+        failures.append("Codex Hooks 更新或移除失败：\(error.localizedDescription)")
+    }
+
+    let uninstalledConfig = (try? String(contentsOf: configURL)) ?? ""
+    expect(
+        uninstalledConfig.contains("usr") && uninstalledConfig.contains("true"),
+        "移除 Hooks 时必须保留用户原有命令"
+    )
+    expect(
+        !uninstalledConfig.contains(AgentIntegrationManager.adapterID),
+        "移除后不应残留 AgentAwake Hook"
+    )
+    expect(
+        !fileManager.fileExists(atPath: manager.installedHelperURL.path),
+        "没有集成使用 helper 时应移除稳定副本"
+    )
+
+    do {
+        try manager.install(.claude)
+        failures.append("未检测到 Claude 时不应创建配置")
+    } catch {
+        expect(
+            manager.inspect(.claude).state == .notDetected,
+            "未检测到 Claude 时状态应保持未检测到"
+        )
+    }
+
+    let claudeDirectory = root.appendingPathComponent(
+        ".claude",
+        isDirectory: true
+    )
+    try? fileManager.createDirectory(
+        at: claudeDirectory,
+        withIntermediateDirectories: true
+    )
+    let invalidClaudeConfig = claudeDirectory.appendingPathComponent(
+        "settings.json"
+    )
+    let invalidData = Data(#"{"hooks":"not-an-object"}"#.utf8)
+    try? invalidData.write(to: invalidClaudeConfig)
+
+    if case .invalidConfiguration = manager.inspect(.claude).state {
+        expect(true, "异常 Claude 配置应被识别")
+    } else {
+        failures.append("异常 Claude 配置应显示配置错误")
+    }
+
+    do {
+        try manager.install(.claude)
+        failures.append("异常 Claude 配置不应被覆盖")
+    } catch {
+        expect(
+            (try? Data(contentsOf: invalidClaudeConfig)) == invalidData,
+            "安装失败后必须保持异常配置原文不变"
+        )
+        expect(
+            !fileManager.fileExists(atPath: manager.installedHelperURL.path),
+            "配置异常时不应留下未使用的 helper"
+        )
+    }
+}
+
 testProtectionSession()
 testAgentActivityParsing()
 testHookActivityStore()
 testHookOverridesTranscriptFallback()
+testSelectiveIntegrationSetup()
 
 if failures.isEmpty {
     let detector = SystemAgentDetector()

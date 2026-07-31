@@ -13,10 +13,23 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased / 未发布]
 
-<!--
-按需添加 Added / Changed / Fixed / Removed 小节。
-Add Added / Changed / Fixed / Removed sections as needed.
--->
+### Added / 新增
+
+- 可独立下载的 Universal 2 App 构建，覆盖 Apple Silicon 与 Intel Mac。
+  Universal 2 app builds for both Apple silicon and Intel Macs.
+- App 内设置窗口，可选管理登录项、Codex Hooks 与 Claude Hooks。
+  In-app settings for the login item and optional Codex/Claude Hooks.
+- 首次启动自动展示菜单栏面板；定时模式无需任何 Agent 或额外配置。
+  First launch reveals the menu bar panel; timed modes need no agent or setup.
+- Developer ID 签名、Apple 公证、DMG/ZIP 制作和 GitHub Release 自动化。
+  Developer ID signing, notarization, DMG/ZIP packaging, and release automation.
+
+### Changed / 变更
+
+- Hooks 安装从命令行前置步骤改为设置中的可选增强，且只修改用户明确选择、
+  本机已检测到的 Agent 配置。
+  Hooks are now optional settings and only modify explicitly selected,
+  locally detected agent configurations.
 
 ## [0.3.1] - 2026-07-31
 

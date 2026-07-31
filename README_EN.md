@@ -14,13 +14,17 @@
 </p>
 
 <p align="center">
-  macOS 13+ · Swift · Current version 0.3.1
+  macOS 13+ · Apple Silicon / Intel · Current version 0.4.0
+</p>
+
+<p align="center">
+  <a href="https://github.com/Raymond711xl/AgentAwake/releases/latest">Download the latest release</a>
 </p>
 
 ## About
 
-AgentAwake is a lightweight macOS menu bar utility for long-running Codex and
-Claude tasks. While a timed mode is active or an agent is working, it prevents
+AgentAwake is a lightweight macOS menu bar utility that is ready to use after
+download. While a timed mode is active or an agent is working, it prevents
 idle sleep with timeout-protected macOS IOKit power assertions. When the task
 finishes, the timer expires, the mode is turned off, or the app quits,
 AgentAwake immediately releases those assertions and returns control to macOS.
@@ -37,6 +41,8 @@ or keeps a persistent `caffeinate` or shell process running.
 - **Hooks first, local logs as fallback** — Uses lifecycle Hooks for timely
   state changes. Without Hooks, it incrementally reads local task logs for a
   zero-configuration fallback instead of trusting long-lived process names.
+- **Download and run** — Regular users need no Codex, Cloud, Xcode, Swift, or
+  terminal. Hooks and login-item behavior are optional settings.
 - **Automatic release and renewal** — Agent mode uses a 120-second lease,
   renews it every 60 seconds, and releases it five seconds after the last agent
   finishes. Stale activity also expires automatically.
@@ -62,24 +68,23 @@ or keeps a persistent `caffeinate` or shell process running.
 ## Requirements
 
 - macOS 13 Ventura or later
-- A Swift toolchain for source builds; Xcode Command Line Tools are sufficient
+- Apple silicon and Intel Macs are supported
 - The current menu bar interface is in Simplified Chinese
 
 ## Usage
 
-### 1. Build and launch
+### 1. Download and launch
 
-From the repository root:
+Open [GitHub Releases](https://github.com/Raymond711xl/AgentAwake/releases/latest):
 
-```bash
-chmod +x scripts/build-app.sh scripts/build-icon.sh
-./scripts/build-app.sh
-open dist/AgentAwake.app
-```
+- **Fewest steps:** download the ZIP, extract it, and double-click
+  `AgentAwake.app`.
+- **Standard installation:** download the DMG, drag the app to Applications,
+  and double-click it.
 
-The build script creates an ad-hoc signed `dist/AgentAwake.app` containing the
-app icon, main executable, and Hook helpers. Once launched, AgentAwake appears
-only in the menu bar and does not show a Dock icon.
+On its first launch, AgentAwake opens its menu bar panel once. It then remains
+in the menu bar without a Dock icon. All three timed modes are immediately
+available and require no further setup.
 
 ### 2. Choose a protection mode
 
@@ -91,36 +96,38 @@ only in the menu bar and does not show a Dock icon.
 Timed modes start their countdown immediately. Agent mode waits without holding
 an assertion, then takes over only when it detects active Codex or Claude work.
 
-### 3. Install Agent Hooks (recommended)
+### 3. Optional settings
 
-Build the app first, then run the idempotent installer:
+Click Settings at the bottom of the menu bar panel to manage:
 
-```bash
-./dist/AgentAwake.app/Contents/Helpers/AgentAwakeHookSetup install
-```
+- launch at login;
+- Codex Hooks;
+- Claude Hooks.
 
-The installer:
+Agent mode reads existing local Codex and Claude activity records by default,
+so Hooks are not a prerequisite. Settings reports local detection state and
+only enables Hook installation for agents that exist on the Mac. It never
+creates configuration for absent software. Only after the user explicitly
+selects Install does the app:
 
-- places the one-shot helper at
+- place the one-shot helper at
   `~/Library/Application Support/AgentAwake/bin/AgentAwakeHook`;
-- safely merges entries into `~/.codex/hooks.json` and
+- safely merge entries into `~/.codex/hooks.json` and
   `~/.claude/settings.json`;
-- creates an `.agentawake-backup` before it first changes an existing config;
-- updates its own entries on repeated runs instead of appending duplicates.
+- create an `.agentawake-backup` before it first changes an existing config;
+- update its own entries on repeated runs instead of appending duplicates.
+
+AgentAwake does not install or run a model. Users configure their own agent
+software, and the app only reads existing local state.
 
 Codex asks you to review unmanaged command Hooks. After installation, enter
 `/hooks` in the Codex CLI, inspect the command path, and trust the new
 AgentAwake Hooks. Codex skips them until they are trusted. Claude loads its
 user-level settings automatically.
 
-Agent mode still works without Hooks by using the local task-log fallback,
-although state transitions may be less immediate.
-
-To remove the adapters:
-
-```bash
-./dist/AgentAwake.app/Contents/Helpers/AgentAwakeHookSetup uninstall
-```
+Agent mode still works without Hooks, although state transitions may be less
+immediate. Installation, repair, and removal all happen in Settings without a
+terminal.
 
 ## Verify that system settings remain unchanged
 
@@ -167,6 +174,16 @@ automatically.
 
 ## Development and verification
 
+Source builds require a Swift toolchain; Xcode Command Line Tools are
+sufficient.
+
+Build the Universal 2 app:
+
+```bash
+./scripts/build-app.sh release universal
+open dist/AgentAwake.app
+```
+
 Run the dependency-free self-test:
 
 ```bash
@@ -186,15 +203,17 @@ Project layout:
 ```text
 Sources/AgentAwake/          Menu bar UI and app lifecycle
 Sources/AgentAwakeCore/      Protection state, agent detection, IOKit assertions
+Sources/AgentAwakeSetupCore/ Optional integration detection and management
 Sources/AgentAwakeHook/      One-shot lifecycle Hook helper
 Sources/AgentAwakeHookSetup/ Hook installer and uninstaller
 Resources/                   Info.plist and app icon
 scripts/                     App and icon build scripts
+docs/RELEASING.md            Signing, notarization, and GitHub Release workflow
 ```
 
 ## Current scope
 
-AgentAwake currently targets locally running Codex and Claude tasks and is
-distributed as a source build. It is not a system power-settings manager and
-does not replace macOS sleep policy; it only postpones idle sleep during the
-selected protection window.
+AgentAwake timed modes do not require an agent. Agent-aware mode currently
+supports locally running Codex and Claude tasks. It is not a system
+power-settings manager and does not replace macOS sleep policy; it only
+postpones idle sleep during the selected protection window.
