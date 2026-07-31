@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run self-test
+        run: swift run --disable-sandbox AgentAwakeSelfTest
+
+      - name: Build architecture-specific release images
+        run: ./scripts/package-release.sh
+
+      - name: Verify release images and checksums
+        run: |
+          test -f dist/release/AgentAwake-*-Apple-Silicon.dmg
+          test -f dist/release/AgentAwake-*-Intel.dmg
+          cd dist/release
+          shasum -a 256 -c AgentAwake-*.sha256

@@ -1,16 +1,27 @@
 import AppKit
 import SwiftUI
 
+private final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
+    }
+}
+
 @MainActor
 final class StatusItemController: NSObject {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let appController: AppController
+    private let onOpenSettings: () -> Void
 
-    init(appController: AppController) {
+    init(
+        appController: AppController,
+        onOpenSettings: @escaping () -> Void
+    ) {
         self.appController = appController
+        self.onOpenSettings = onOpenSettings
         self.statusItem = NSStatusBar.system.statusItem(
-            withLength: 31
+            withLength: NSStatusItem.squareLength
         )
         self.popover = NSPopover()
         super.init()
@@ -40,9 +51,18 @@ final class StatusItemController: NSObject {
         popover.behavior = .transient
         popover.animates = true
         popover.contentSize = NSSize(width: 340, height: 290)
-        popover.contentViewController = NSHostingController(
-            rootView: StatusPopoverView(appController: appController)
+        let hostingView = FirstMouseHostingView(
+            rootView: StatusPopoverView(
+                appController: appController,
+                onOpenSettings: { [weak self] in
+                    self?.popover.performClose(nil)
+                    self?.onOpenSettings()
+                }
+            )
         )
+        let contentViewController = NSViewController()
+        contentViewController.view = hostingView
+        popover.contentViewController = contentViewController
     }
 
     private func updateStatusIcon() {
@@ -78,10 +98,10 @@ final class StatusItemController: NSObject {
             return
         }
 
-        showPopover()
+        presentPopover()
     }
 
-    private func showPopover() {
+    func presentPopover() {
         guard let button = statusItem.button else {
             return
         }

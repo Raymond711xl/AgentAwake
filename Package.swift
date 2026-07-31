@@ -13,6 +13,10 @@ let package = Package(
             name: "AgentAwakeCore",
             targets: ["AgentAwakeCore"]
         ),
+        .library(
+            name: "AgentAwakeSetupCore",
+            targets: ["AgentAwakeSetupCore"]
+        ),
         .executable(
             name: "AgentAwake",
             targets: ["AgentAwake"]
@@ -35,18 +39,25 @@ let package = Package(
         ),
         .executableTarget(
             name: "AgentAwake",
-            dependencies: ["AgentAwakeCore"]
+            dependencies: ["AgentAwakeCore", "AgentAwakeSetupCore"],
+            linkerSettings: [
+                .linkedFramework("ServiceManagement")
+            ]
         ),
         .executableTarget(
             name: "AgentAwakeHook",
             dependencies: ["AgentAwakeCore"]
         ),
         .executableTarget(
-            name: "AgentAwakeHookSetup"
+            name: "AgentAwakeHookSetup",
+            dependencies: ["AgentAwakeSetupCore"]
+        ),
+        .target(
+            name: "AgentAwakeSetupCore"
         ),
         .executableTarget(
             name: "AgentAwakeSelfTest",
-            dependencies: ["AgentAwakeCore"]
+            dependencies: ["AgentAwakeCore", "AgentAwakeSetupCore"]
         ),
         .executableTarget(
             name: "AgentAwakePowerProbe",
