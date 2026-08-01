@@ -1,9 +1,9 @@
 # AgentAwake App Icon Visual Exploration
 
 This prompt set translates the compact menu bar mark into a full macOS app
-icon. The production refinement enlarges the central mark and adds restrained
-macOS-style depth; review every generated result at 1024 px, 64 px, and 32 px
-before replacing the production asset.
+icon. The production refinement preserves the central mark, adds restrained
+macOS-style depth, and uses a measured macOS safe area; review every generated
+result at 1024 px, 64 px, and 32 px before replacing the production asset.
 
 ## Picture Description
 
@@ -13,10 +13,12 @@ before replacing the production asset.
 - **Sleep cue:** exactly one uppercase `Z` at the sparkle's upper-right corner,
   tilted about 8 degrees to the left. Use a clean, rounded sans-serif glyph.
 - **Composition:** the sparkle is the dominant form, centered horizontally and
-  geometrically centered vertically. Its highest and lowest tips are equally distant from
-  the canvas edges, with no optical vertical offset. The `Z` sits close enough
-  to feel attached, while retaining a clear gap at small sizes. The combined
-  mark occupies roughly 60–64% of the canvas width and 64–68% of its height.
+  geometrically centered vertically. Its highest and lowest tips are equally
+  distant from the canvas edges, with no optical vertical offset. The `Z` sits
+  close enough to feel attached, while retaining a clear gap at small sizes.
+  The rounded-square tile occupies 84–85% of the canvas in both dimensions,
+  centered within transparent padding. The combined mark occupies roughly
+  52–56% of the full canvas width and 56–60% of its height.
 - **Color:** warm clay orange and apricot, with soft cream highlights and a deep
   cocoa accent. The palette should feel playful, contemporary, and human rather
   than corporate or traditionally blue. It may evoke the warmth of modern AI
@@ -30,11 +32,13 @@ before replacing the production asset.
 
 Create a premium macOS app icon for **AgentAwake**, a lightweight utility that
 keeps a Mac awake while an AI agent is working. Use a rounded-square icon canvas
-with generous safe margins. The only central symbol is a single elegant
+with transparent safe margins. Center the visible rounded-square tile and size
+its boundary to 84–85% of the 1024×1024 canvas, leaving equal padding on all
+four sides. The only central symbol is a single elegant
 **four-point cross-shaped sparkle**: long vertical tips, shorter horizontal tips,
 smooth slightly rounded contours, centered horizontally and vertically.
-Scale the combined sparkle-and-`Z` mark to roughly 60–64% of the canvas width
-and 64–68% of its height so it retains visual weight when installed.
+Scale the combined sparkle-and-`Z` mark to roughly 52–56% of the full canvas
+width and 56–60% of its height so it remains refined at installed-app sizes.
 Center the sparkle geometrically on the vertical canvas axis: its highest and
 lowest visible tips must have exactly equal top and bottom margins.
 Place **exactly one uppercase Z** at the sparkle's upper-right corner, close to
@@ -55,7 +59,8 @@ Strict constraints: one four-point sparkle and one Z only; no five-point star,
 no additional Z letters, no crescent moon, no cloud, no face, no mascot, no blue
 or navy background, no yellow star, no neon glow, no metallic chrome, no busy
 texture, no tiny decorative particles, no drop-shadow halo, no text other than
-the single Z, no border, no watermark, and no imitation of an existing brand.
+the single Z, no border, no watermark, no opaque pixels outside the centered
+rounded-square tile, and no imitation of an existing brand.
 
 ## Model Notes
 
@@ -84,5 +89,7 @@ increase the negative space, and verify recognition at 16 px.”
   five-point star.
 - There is exactly one readable, slightly left-leaning `Z`.
 - The mark remains recognizable at 16 px and does not become a fragmented shape.
+- The visible tile boundary occupies 84–85% of the 1024 px canvas and is centered
+  inside equal transparent margins.
 - The orange palette feels warm and lively without reproducing another brand.
 - The generated asset has no text artifacts, extra particles, borders, or logos.

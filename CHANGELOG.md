@@ -21,15 +21,28 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
   activity as a task-monitoring signal; exact integrations will be announced
   after implementation and privacy-boundary validation.
 
+## [0.4.1] - 2026-08-01
+
+### Fixed / 修复
+
+- 重新构建并发布双架构 DMG，确保从 GitHub 下载的 App 使用当前四角十字星与
+  单 `Z` 图标，不再携带上一版发布包中的旧图标。
+  Rebuilt and republished both architecture-specific DMGs so GitHub downloads
+  contain the current four-point sparkle and single-`Z` icon instead of the
+  previous release asset.
+- 保持 1024×1024 源图和完整 ICNS 分辨率不变，将图标可见边界从画布的 98.4%
+  调整为 84.8%，与实测的 ChatGPT 85.0% 和 Claude 83.8% 视觉尺度一致。
+  Kept the 1024×1024 source and full ICNS resolution while reducing the visible
+  icon boundary from 98.4% to 84.8%, matching the measured visual footprint of
+  ChatGPT at 85.0% and Claude at 83.8%.
+
 ### Changed / 变更
 
-- 放大 APP 图标的十字星与 `Z` 核心标记，并加入克制的边缘高光、柔和内光和
-  浮雕阴影，同时将十字星按几何边界强制垂直居中，改善安装后的视觉重量与
-  小尺寸识别。
-  Enlarged the app icon's sparkle-and-`Z` mark and added restrained edge
-  highlights, inner glow, and dimensional shading, while geometrically centering
-  the sparkle vertically for stronger installed-app presence and small-size
-  recognition.
+- APP 图标采用带克制边缘高光、柔和内光和浮雕阴影的四角十字星与单 `Z`，
+  同时将十字星按几何边界强制垂直居中，并加入符合 macOS 视觉尺度的透明留白。
+  The app icon now uses a four-point sparkle and single `Z` with restrained edge
+  highlights, inner glow, and dimensional shading, while keeping the sparkle
+  geometrically centered and adding macOS-appropriate transparent safe margins.
 - README 改用 288×288 的轻量图标预览，不再加载 1024×1024 的生产源图。
   The READMEs now use a lightweight 288×288 icon preview instead of loading the
   1024×1024 production source asset.

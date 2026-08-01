@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  macOS 13+ · Apple Silicon / Intel · Current version 0.4.0
+  macOS 13+ · Apple Silicon / Intel · Current version 0.4.1
 </p>
 
 <p align="center">
