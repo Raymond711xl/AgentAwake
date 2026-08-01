@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <img src="Resources/AppIcon.png" width="144" alt="AgentAwake APP 图标">
+  <img src="Resources/AppIconREADME.png" width="144" alt="AgentAwake APP 图标">
 </p>
 
 <h1 align="center">AgentAwake</h1>
@@ -30,6 +30,10 @@ AgentAwake 是一个下载后即可使用的轻量 macOS 菜单栏工具。
 
 它不会调用 `pmset`，不会修改系统的休眠、锁屏或显示器设置，也不会启动常驻的
 `caffeinate` 或 shell 子进程。
+
+下一版本计划扩展对更多 Agent 的识别，并探索把大模型 API 使用活动作为额外的
+任务运行信号。具体支持范围会在实现与隐私边界验证完成后公布；AgentAwake
+不会读取提示词、响应正文或 API 密钥。
 
 ## 核心功能
 

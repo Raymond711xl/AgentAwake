@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <img src="Resources/AppIcon.png" width="144" alt="AgentAwake app icon">
+  <img src="Resources/AppIconREADME.png" width="144" alt="AgentAwake app icon">
 </p>
 
 <h1 align="center">AgentAwake</h1>
@@ -31,6 +31,11 @@ AgentAwake immediately releases those assertions and returns control to macOS.
 
 It never calls `pmset`, changes your sleep, lock-screen, or display preferences,
 or keeps a persistent `caffeinate` or shell process running.
+
+The next release is planned to recognize more agents and explore LLM API
+activity as an additional task-running signal. Exact integrations will be
+announced after implementation and privacy-boundary validation; AgentAwake
+will not read prompts, response bodies, or API keys.
 
 ## Core features
 

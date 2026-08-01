@@ -13,6 +13,27 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased / 未发布]
 
+### Planned / 计划
+
+- 下一版本计划扩展对更多 Agent 的识别，并探索基于大模型 API 使用活动的任务
+  监测方案；具体支持范围会在实现与隐私边界验证完成后公布。
+  The next release is planned to recognize more agents and explore LLM API
+  activity as a task-monitoring signal; exact integrations will be announced
+  after implementation and privacy-boundary validation.
+
+### Changed / 变更
+
+- 放大 APP 图标的十字星与 `Z` 核心标记，并加入克制的边缘高光、柔和内光和
+  浮雕阴影，同时将十字星按几何边界强制垂直居中，改善安装后的视觉重量与
+  小尺寸识别。
+  Enlarged the app icon's sparkle-and-`Z` mark and added restrained edge
+  highlights, inner glow, and dimensional shading, while geometrically centering
+  the sparkle vertically for stronger installed-app presence and small-size
+  recognition.
+- README 改用 288×288 的轻量图标预览，不再加载 1024×1024 的生产源图。
+  The READMEs now use a lightweight 288×288 icon preview instead of loading the
+  1024×1024 production source asset.
+
 ## [0.4.0] - 2026-07-31
 
 ### Added / 新增
