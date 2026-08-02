@@ -3,6 +3,8 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var controller: IntegrationSettingsController
+    @AppStorage(CompletionSoundPlayer.preferenceKey)
+    private var completionSoundEnabled = true
 
     var body: some View {
         ScrollView {
@@ -10,6 +12,7 @@ struct SettingsView: View {
                 header
                 generalSection
                 integrationSection
+                bridgeSection
 
                 if let feedbackText = controller.feedbackText {
                     Label(feedbackText, systemImage: "info.circle")
@@ -22,7 +25,7 @@ struct SettingsView: View {
             }
             .padding(24)
         }
-        .frame(width: 540, height: 520)
+        .frame(width: 560, height: 650)
         .onAppear {
             controller.refresh()
         }
@@ -69,17 +72,39 @@ struct SettingsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                 }
+
+                Divider()
+
+                HStack(spacing: 12) {
+                    Toggle(
+                        "结束时播放“星眠”",
+                        isOn: $completionSoundEnabled
+                    )
+
+                    Spacer()
+
+                    Button("试听") {
+                        CompletionSoundPlayer.shared.playPreview()
+                    }
+                    .controlSize(.small)
+                }
+
+                Text(
+                    "仅在倒计时自然结束，或最后一个 Agent 确认停止后播放；" +
+                    "手动关闭和退出不会播放。"
+                )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
             }
         }
     }
 
     private var integrationSection: some View {
-        settingsCard(title: "Agent 集成（可选）", systemImage: "puzzlepiece") {
+        settingsCard(title: "Agent 活动检测", systemImage: "puzzlepiece") {
             VStack(alignment: .leading, spacing: 14) {
                 Text(
-                    "AgentAwake 不安装或运行大模型，只读取用户已经配置好的" +
-                    "本机状态。安装 Hooks 只用于让开始和结束更及时，" +
-                    "不安装也能使用。"
+                    "自动检测无需配置；精确跟踪需要按 Agent 启用。" +
+                    "Hooks 失效时会自动回退到本地活动记录。"
                 )
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -96,34 +121,163 @@ struct SettingsView: View {
         }
     }
 
+    private var bridgeSection: some View {
+        settingsCard(title: "自定义 Agent Bridge", systemImage: "link") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Text("通用精确跟踪")
+                        .font(.system(size: 13, weight: .medium))
+
+                    Text(bridgeStatusText)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(bridgeStatusColor)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            bridgeStatusColor.opacity(0.1),
+                            in: Capsule()
+                        )
+
+                    Spacer()
+                    bridgeAction
+                }
+
+                Text(
+                    "供支持运行命令的第三方 Agent 发送 start、heartbeat 和 " +
+                    "stop。Bridge 每次写入事件后立即退出，不会增加常驻服务。"
+                )
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if controller.bridge.state != .available {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(controller.bridge.commandTemplate)
+                            .font(.system(size: 10, design: .monospaced))
+                            .textSelection(.enabled)
+                            .padding(9)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                Color.primary.opacity(0.045),
+                                in: RoundedRectangle(cornerRadius: 7)
+                            )
+
+                        Button("复制命令模板") {
+                            controller.copyBridgeCommand()
+                        }
+                        .controlSize(.small)
+
+                        Text(
+                            "把 EVENT 替换为 start、heartbeat 或 stop；" +
+                            "SESSION_ID 在同一次任务中保持一致。"
+                        )
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var bridgeAction: some View {
+        switch controller.bridge.state {
+        case .available:
+            Button(controller.isChangingBridge ? "启用中…" : "启用 Bridge") {
+                controller.installBridge()
+            }
+            .disabled(controller.isChangingBridge)
+
+        case .installed:
+            Button(controller.isChangingBridge ? "移除中…" : "移除") {
+                controller.uninstallBridge()
+            }
+            .disabled(controller.isChangingBridge)
+
+        case .needsRepair:
+            Button(controller.isChangingBridge ? "修复中…" : "修复") {
+                controller.installBridge()
+            }
+            .disabled(controller.isChangingBridge)
+        }
+    }
+
+    private var bridgeStatusText: String {
+        switch controller.bridge.state {
+        case .available:
+            return "可选"
+        case .installed:
+            return "已启用"
+        case .needsRepair:
+            return "需更新"
+        }
+    }
+
+    private var bridgeStatusColor: Color {
+        switch controller.bridge.state {
+        case .available:
+            return .secondary
+        case .installed:
+            return .green
+        case .needsRepair:
+            return .orange
+        }
+    }
+
     private func integrationRow(
         _ integration: AgentIntegrationSnapshot
     ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: providerSymbol(integration.provider))
-                .font(.system(size: 16, weight: .medium))
-                .frame(width: 26, height: 26)
-                .background(
-                    Color.primary.opacity(0.06),
-                    in: RoundedRectangle(cornerRadius: 7)
-                )
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: providerSymbol(integration.provider))
+                    .font(.system(size: 16, weight: .medium))
+                    .frame(width: 26, height: 26)
+                    .background(
+                        Color.primary.opacity(0.06),
+                        in: RoundedRectangle(cornerRadius: 7)
+                    )
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 7) {
-                    Text(integration.provider.displayName)
-                        .font(.system(size: 13, weight: .medium))
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 7) {
+                        Text(integration.provider.displayName)
+                            .font(.system(size: 13, weight: .medium))
 
-                    statusBadge(integration.state)
+                        statusBadge(integration.state)
+                    }
+
+                    Text(integrationDescription(integration))
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
 
-                Text(integrationDescription(integration))
-                    .font(.system(size: 10.5))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                Spacer(minLength: 12)
+                integrationActions(integration)
             }
 
-            Spacer(minLength: 12)
-            integrationActions(integration)
+            if showsIntegrationPreview(integration.state) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("安装前预览 · 已有配置首次修改前会创建备份")
+                        .foregroundStyle(.secondary)
+                    Text("配置：\(integration.configurationPath)")
+                    Text("新增：\(integration.commandPreview)")
+                }
+                .font(.system(size: 9.5, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(.leading, 38)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func showsIntegrationPreview(
+        _ state: AgentIntegrationState
+    ) -> Bool {
+        switch state {
+        case .available, .needsRepair:
+            return true
+        case .notDetected, .installed, .invalidConfiguration:
+            return false
         }
     }
 

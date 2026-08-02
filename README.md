@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  macOS 13+ · Apple Silicon / Intel · 当前版本 0.4.1
+  macOS 13+ · Apple Silicon / Intel · 当前版本 0.5.0
 </p>
 
 <p align="center">
@@ -31,9 +31,10 @@ AgentAwake 是一个下载后即可使用的轻量 macOS 菜单栏工具。
 它不会调用 `pmset`，不会修改系统的休眠、锁屏或显示器设置，也不会启动常驻的
 `caffeinate` 或 shell 子进程。
 
-下一版本计划扩展对更多 Agent 的识别，并探索把大模型 API 使用活动作为额外的
-任务运行信号。具体支持范围会在实现与隐私边界验证完成后公布；AgentAwake
-不会读取提示词、响应正文或 API 密钥。
+当前开发版已经建立“自动检测（无需配置）”和“精确跟踪（按 Agent 配置）”两个
+层级，并将旧的高频轮询替换为低资源事件驱动。下一步会逐个加入经过验证的第三方
+适配器；详见 [Agent 活动检测路线图](docs/AGENT_ACTIVITY_DETECTION_PLAN.md)。
+AgentAwake 不会读取提示词、响应正文、Token 明细或 API 密钥。
 
 ## 核心功能
 
@@ -43,7 +44,11 @@ AgentAwake 是一个下载后即可使用的轻量 macOS 菜单栏工具。
   保持系统和显示器唤醒。
 - **Hooks 优先、日志兜底**：优先使用生命周期 Hooks 获取及时状态；未安装 Hooks
   时，自动增量读取本地任务日志作为零配置兜底，不依赖可能长期常驻的进程名。
-- **下载后直接使用**：普通用户不需要 Codex、Cloud、Xcode、Swift 或终端；
+- **事件驱动、缓存有界**：Agent 模式复用一个 macOS 原生文件事件流，只读取新增
+  字节；每 15 分钟低频校准，会话和解析缓冲区都有固定上限。
+- **通用 Bridge**：能运行生命周期命令的第三方 Agent 可发送 `start`、
+  `heartbeat`、`stop`；一次性 helper 写入本地状态后立即退出。
+- **下载后直接使用**：普通用户不需要 Codex、Claude、Xcode、Swift 或终端；
   Hooks 与登录项等增强能力都在设置中按需启用。
 - **自动释放与续租**：Agent 模式使用 120 秒短租约，每 60 秒续期；最后一个
   Agent 结束 5 秒后自动释放，异常失联的状态也会过期。
@@ -107,7 +112,8 @@ AgentAwake 是一个下载后即可使用的轻量 macOS 菜单栏工具。
 
 - 登录时启动；
 - Codex Hooks；
-- Claude Hooks。
+- Claude Hooks；
+- 自定义 Agent Bridge。
 
 Agent 模式默认读取本机已有的 Codex 与 Claude 活动记录，因此 Hooks 不是使用
 前置条件。设置页会标明本机检测状态，只允许为实际存在的 Agent 安装 Hooks，
@@ -128,6 +134,11 @@ Claude 的用户级设置会自动加载。
 
 不安装 Hooks 也可以使用 Agent 模式，只是状态变化可能不如 Hooks 及时。
 安装、修复和移除均在设置页完成，不需要终端。
+
+如果第三方 Agent 支持在生命周期中执行命令，可以在设置中启用 Bridge，复制一行
+模板，并把 `EVENT` 分别替换成 `start`、`heartbeat` 或 `stop`。同一任务必须保持
+相同的 `SESSION_ID`。Bridge 不是网络抓包，也不会自动识别任意常驻进程；Agent
+本身必须能在正确的生命周期时机执行该命令。
 
 ## 如何确认没有修改系统设置
 
@@ -156,14 +167,15 @@ app-server、sandbox 和流式进程可能长期常驻。
 - `Stop`、Claude 的 `StopFailure`、`SessionEnd`：结束租约。
 
 同一会话收到 Hook 状态后，Hook 会覆盖可能滞后的 transcript 判断。
-没有 Hooks 时，App 只增量读取 Codex 与 Claude 的本地任务日志；
+没有 Hooks 时，App 通过一个共享的 macOS 文件事件流监听变化，只增量读取 Codex
+与 Claude 本地任务日志新增的字节，并以 15 分钟低频校准兜底；
 超过 30 分钟没有新事件的状态会自动失效。
 
 ## 隐私与安全
 
 - 所有判断都在本机完成，App 不连接外部服务，也不上传任务内容。
 - Hook 租约只保存 Agent 类型、会话标识、事件名、状态和更新时间，
-  不保存 prompt 正文。
+  不保存 prompt、response、Token 或凭证。
 - 本地租约位于
   `~/Library/Application Support/AgentAwake/AgentActivity`。
 - App 退出、模式关闭、倒计时结束或租约超时都会释放电源断言。
@@ -185,6 +197,15 @@ CLANG_MODULE_CACHE_PATH=/private/tmp/agentawake-clang-cache \
 SWIFT_MODULECACHE_PATH=/private/tmp/agentawake-swift-cache \
 swift run --disable-sandbox AgentAwakeSelfTest
 ```
+
+对已经运行的 App 重复采样 RSS、CPU、线程和文件句柄：
+
+```bash
+./scripts/measure-resources.sh --pid PID --duration 600 --interval 5
+```
+
+短时参考样本与尚待执行的 8 小时稳定性门槛记录在
+[Agent 活动检测路线图](docs/AGENT_ACTIVITY_DETECTION_PLAN.md)。
 
 重新生成 `.icns`：
 
@@ -208,5 +229,7 @@ docs/RELEASING.md            双架构 DMG 与 GitHub Release 流程
 ## 当前边界
 
 AgentAwake 的定时模式不依赖任何 Agent；Agent 感知模式当前支持本机运行的
-Codex 与 Claude。它不是系统电源设置管理器，也不会替代 macOS 原有的睡眠
-策略；它只在所选窗口内临时延后空闲休眠。
+Codex 与 Claude 自动检测，以及能执行生命周期命令的自定义 Agent Bridge。
+Cursor、OpenCode、Kimi 等产品的零配置适配器仍会在下一阶段逐个验证，不能仅凭
+进程或加密流量宣称支持。AgentAwake 不是系统电源设置管理器，也不会替代 macOS
+原有睡眠策略；它只在所选窗口内临时延后空闲休眠。

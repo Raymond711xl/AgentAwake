@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  macOS 13+ · Apple Silicon / Intel · Current version 0.4.1
+  macOS 13+ · Apple Silicon / Intel · Current version 0.5.0
 </p>
 
 <p align="center">
@@ -32,10 +32,12 @@ AgentAwake immediately releases those assertions and returns control to macOS.
 It never calls `pmset`, changes your sleep, lock-screen, or display preferences,
 or keeps a persistent `caffeinate` or shell process running.
 
-The next release is planned to recognize more agents and explore LLM API
-activity as an additional task-running signal. Exact integrations will be
-announced after implementation and privacy-boundary validation; AgentAwake
-will not read prompts, response bodies, or API keys.
+The current development build now has two progressive levels:
+zero-configuration automatic detection and per-agent precise tracking. The old
+high-frequency scan has been replaced by a bounded event-driven engine. The
+next step is adding one verified third-party adapter at a time. See the
+[agent activity detection roadmap](docs/AGENT_ACTIVITY_DETECTION_PLAN.md).
+AgentAwake does not read prompts, response bodies, token details, or API keys.
 
 ## Core features
 
@@ -46,6 +48,12 @@ will not read prompts, response bodies, or API keys.
 - **Hooks first, local logs as fallback** — Uses lifecycle Hooks for timely
   state changes. Without Hooks, it incrementally reads local task logs for a
   zero-configuration fallback instead of trusting long-lived process names.
+- **Event-driven and bounded** — Agent mode reuses one native macOS file-event
+  stream, reads only appended bytes, reconciles every 15 minutes, and caps both
+  session state and parser buffers.
+- **Universal Bridge** — Third-party agents that can run lifecycle commands can
+  send `start`, `heartbeat`, and `stop`. The one-shot helper writes local state
+  and exits immediately.
 - **Download and run** — Regular users need no Codex, Cloud, Xcode, Swift, or
   terminal. Hooks and login-item behavior are optional settings.
 - **Automatic release and renewal** — Agent mode uses a 120-second lease,
@@ -118,7 +126,8 @@ Click Settings at the bottom of the menu bar panel to manage:
 
 - launch at login;
 - Codex Hooks;
-- Claude Hooks.
+- Claude Hooks;
+- the custom Agent Bridge.
 
 Agent mode reads existing local Codex and Claude activity records by default,
 so Hooks are not a prerequisite. Settings reports local detection state and
@@ -144,6 +153,12 @@ user-level settings automatically.
 Agent mode still works without Hooks, although state transitions may be less
 immediate. Installation, repair, and removal all happen in Settings without a
 terminal.
+
+If a third-party agent can execute lifecycle commands, enable Bridge in
+Settings and copy the one-line template. Replace `EVENT` with `start`,
+`heartbeat`, or `stop`, and keep the same `SESSION_ID` for one task. Bridge is
+not packet interception and does not infer activity from a resident process;
+the agent must invoke it at the correct lifecycle points.
 
 ## Verify that system settings remain unchanged
 
@@ -173,16 +188,17 @@ Lifecycle events are the preferred source:
 - `Stop`, Claude's `StopFailure`, and `SessionEnd` end it.
 
 Once Hook state is available for a session, it overrides a potentially stale
-transcript result. Without Hooks, AgentAwake incrementally reads local Codex and
-Claude task logs. A fallback state with no new event for 30 minutes expires
-automatically.
+transcript result. Without Hooks, one shared native file-event stream triggers
+incremental reads of only the appended bytes in local Codex and Claude task
+logs, with a 15-minute reconciliation fallback. A state with no new event for
+30 minutes expires automatically.
 
 ## Privacy and safety
 
 - All detection happens locally. The app does not contact an external service
   or upload task content.
 - Hook leases store only the agent type, session identifier, event name, state,
-  and update time — never the prompt body.
+  and update time — never prompts, responses, tokens, or credentials.
 - Local leases live in
   `~/Library/Application Support/AgentAwake/AgentActivity`.
 - Quitting the app, turning the mode off, reaching the timer deadline, or
@@ -207,6 +223,16 @@ SWIFT_MODULECACHE_PATH=/private/tmp/agentawake-swift-cache \
 swift run --disable-sandbox AgentAwakeSelfTest
 ```
 
+Repeatedly sample RSS, CPU, threads, and open files for a running app:
+
+```bash
+./scripts/measure-resources.sh --pid PID --duration 600 --interval 5
+```
+
+Short reference measurements and the pending eight-hour stability gate are
+recorded in the
+[agent activity detection roadmap](docs/AGENT_ACTIVITY_DETECTION_PLAN.md).
+
 Regenerate the `.icns` file:
 
 ```bash
@@ -229,6 +255,10 @@ docs/RELEASING.md            Dual-architecture DMG and GitHub Release workflow
 ## Current scope
 
 AgentAwake timed modes do not require an agent. Agent-aware mode currently
-supports locally running Codex and Claude tasks. It is not a system
-power-settings manager and does not replace macOS sleep policy; it only
-postpones idle sleep during the selected protection window.
+supports automatic local detection for Codex and Claude, plus precise Bridge
+events from custom agents that can execute lifecycle commands. Zero-setup
+adapters for Cursor, OpenCode, Kimi, and others still require individual
+verification; a process name or encrypted traffic alone is not treated as
+support. AgentAwake is not a system power-settings manager and does not replace
+macOS sleep policy; it only postpones idle sleep during the selected protection
+window.

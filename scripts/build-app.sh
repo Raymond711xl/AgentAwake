@@ -11,6 +11,7 @@ MACOS_DIR="$CONTENTS_DIR/MacOS"
 HELPERS_DIR="$CONTENTS_DIR/Helpers"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 APP_ICON="$PROJECT_DIR/Resources/AppIcon.icns"
+COMPLETION_SOUND="$PROJECT_DIR/Resources/CompletionSound.wav"
 BUILD_ROOT="$PROJECT_DIR/.build/app-bundle"
 EXECUTABLES=(AgentAwake AgentAwakeHook AgentAwakeHookSetup)
 
@@ -33,6 +34,11 @@ esac
 
 if [[ ! -f "$APP_ICON" ]]; then
     "$PROJECT_DIR/scripts/build-icon.sh"
+fi
+
+if [[ ! -f "$COMPLETION_SOUND" ]]; then
+    echo "Missing completion sound: $COMPLETION_SOUND" >&2
+    exit 66
 fi
 
 build_for_architecture() {
@@ -101,6 +107,7 @@ fi
 
 /bin/cp "$PROJECT_DIR/Resources/Info.plist" "$CONTENTS_DIR/Info.plist"
 /bin/cp "$APP_ICON" "$RESOURCES_DIR/AppIcon.icns"
+/bin/cp "$COMPLETION_SOUND" "$RESOURCES_DIR/CompletionSound.wav"
 /bin/chmod 755 \
     "$MACOS_DIR/AgentAwake" \
     "$HELPERS_DIR/AgentAwakeHook" \

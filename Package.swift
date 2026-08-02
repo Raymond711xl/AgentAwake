@@ -34,7 +34,8 @@ let package = Package(
         .target(
             name: "AgentAwakeCore",
             linkerSettings: [
-                .linkedFramework("IOKit")
+                .linkedFramework("IOKit"),
+                .linkedFramework("CoreServices")
             ]
         ),
         .executableTarget(

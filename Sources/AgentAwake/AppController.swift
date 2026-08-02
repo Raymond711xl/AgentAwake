@@ -15,20 +15,26 @@ final class AppController: ObservableObject {
 
     private let detector: SystemAgentDetector
     private let powerController: PowerAssertionController
+    private let completionSoundPlayer: CompletionSoundPlayer
     private var session: ProtectionSession
     private var monitorTimer: Timer?
-    private var scanTick = 0
+    private var leaseCheckTick = 0
+    private var reconciliationTick = 0
     private var isScanning = false
+    private var pendingAgentRefresh = false
+    private var pendingFullReconciliation = false
     private var scanGeneration = 0
     private var idleStatusText = "已关闭 · 使用系统原设置"
     private var waitingStatusText = "已开启 · 等待 Agent"
 
     init(
         detector: SystemAgentDetector = SystemAgentDetector(),
-        powerController: PowerAssertionController = PowerAssertionController()
+        powerController: PowerAssertionController = PowerAssertionController(),
+        completionSoundPlayer: CompletionSoundPlayer? = nil
     ) {
         self.detector = detector
         self.powerController = powerController
+        self.completionSoundPlayer = completionSoundPlayer ?? .shared
         self.selectedMode = .off
         self.session = ProtectionSession(mode: .off)
     }
@@ -63,7 +69,8 @@ final class AppController: ObservableObject {
 
         startMonitoring()
         if mode.isAgentMode {
-            refreshAgents()
+            startAgentEventMonitoring()
+            refreshAgents(forceReconciliation: true)
         }
     }
 
@@ -80,7 +87,8 @@ final class AppController: ObservableObject {
             return
         }
 
-        scanTick = 0
+        leaseCheckTick = 0
+        reconciliationTick = 0
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.handleTimerTick()
@@ -93,8 +101,12 @@ final class AppController: ObservableObject {
     private func stopMonitoring() {
         monitorTimer?.invalidate()
         monitorTimer = nil
-        scanTick = 0
+        detector.stopMonitoring()
+        leaseCheckTick = 0
+        reconciliationTick = 0
         isScanning = false
+        pendingAgentRefresh = false
+        pendingFullReconciliation = false
         scanGeneration += 1
     }
 
@@ -107,9 +119,15 @@ final class AppController: ObservableObject {
         }
 
         if session.mode.isAgentMode {
-            scanTick += 1
-            if scanTick >= 4 {
-                scanTick = 0
+            leaseCheckTick += 1
+            reconciliationTick += 1
+
+            if reconciliationTick >= 900 {
+                reconciliationTick = 0
+                leaseCheckTick = 0
+                refreshAgents(forceReconciliation: true)
+            } else if leaseCheckTick >= 60 {
+                leaseCheckTick = 0
                 refreshAgents()
             }
         }
@@ -117,11 +135,27 @@ final class AppController: ObservableObject {
         refreshPresentation(now: now)
     }
 
-    private func refreshAgents() {
+    private func startAgentEventMonitoring() {
+        detector.startMonitoring { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.refreshAgents()
+            }
+        }
+    }
+
+    private func refreshAgents(
+        forceReconciliation: Bool = false
+    ) {
         guard session.isEnabled,
-              session.mode.isAgentMode,
-              !isScanning
+              session.mode.isAgentMode
         else {
+            return
+        }
+
+        guard !isScanning else {
+            pendingAgentRefresh = true
+            pendingFullReconciliation = pendingFullReconciliation
+                || forceReconciliation
             return
         }
 
@@ -130,7 +164,9 @@ final class AppController: ObservableObject {
         let detector = self.detector
 
         Task.detached(priority: .utility) {
-            let agents = detector.runningAgents()
+            let agents = detector.runningAgents(
+                forceReconciliation: forceReconciliation
+            )
 
             await MainActor.run { [weak self] in
                 guard let self else {
@@ -154,6 +190,16 @@ final class AppController: ObservableObject {
                     ),
                     now: now
                 )
+
+                let shouldRefreshAgain = self.pendingAgentRefresh
+                let shouldReconcile = self.pendingFullReconciliation
+                self.pendingAgentRefresh = false
+                self.pendingFullReconciliation = false
+                if shouldRefreshAgain {
+                    self.refreshAgents(
+                        forceReconciliation: shouldReconcile
+                    )
+                }
             }
         }
     }
@@ -185,11 +231,13 @@ final class AppController: ObservableObject {
 
             case .agentFinished:
                 waitingStatusText = "Agent 已结束 · 已恢复系统休眠计时"
+                completionSoundPlayer.playCompletionIfEnabled()
 
             case let .autoDisabled(reason):
                 switch reason {
                 case .durationElapsed:
                     idleStatusText = "时长已到 · 已归还休眠权限"
+                    completionSoundPlayer.playCompletionIfEnabled()
                 }
                 selectedMode = .off
                 session.selectMode(.off)

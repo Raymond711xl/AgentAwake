@@ -1,11 +1,14 @@
 import AgentAwakeSetupCore
+import AppKit
 import Foundation
 import ServiceManagement
 
 @MainActor
 final class IntegrationSettingsController: ObservableObject {
     @Published private(set) var integrations: [AgentIntegrationSnapshot] = []
+    @Published private(set) var bridge: AgentBridgeSnapshot
     @Published private(set) var workingProvider: AgentIntegrationProvider?
+    @Published private(set) var isChangingBridge = false
     @Published private(set) var feedbackText: String?
     @Published private(set) var launchAtLoginEnabled = false
     @Published private(set) var launchAtLoginNeedsApproval = false
@@ -22,17 +25,59 @@ final class IntegrationSettingsController: ObservableObject {
             .appendingPathComponent("Contents", isDirectory: true)
             .appendingPathComponent("Helpers", isDirectory: true)
             .appendingPathComponent("AgentAwakeHook")
-        self.manager = manager ?? AgentIntegrationManager(
+        let resolvedManager = manager ?? AgentIntegrationManager(
             bundledHelperURL: helperURL
         )
+        self.manager = resolvedManager
+        self.bridge = resolvedManager.inspectBridge()
         self.loginService = loginService
         refresh()
     }
 
     func refresh() {
         integrations = manager.inspectAll()
+        bridge = manager.inspectBridge()
         launchAtLoginEnabled = loginService.status == .enabled
         launchAtLoginNeedsApproval = loginService.status == .requiresApproval
+    }
+
+    func installBridge() {
+        guard !isChangingBridge else {
+            return
+        }
+
+        isChangingBridge = true
+        feedbackText = nil
+        do {
+            try manager.installBridge()
+            feedbackText = "自定义 Agent Bridge 已启用。"
+        } catch {
+            feedbackText = error.localizedDescription
+        }
+        isChangingBridge = false
+        refresh()
+    }
+
+    func uninstallBridge() {
+        guard !isChangingBridge else {
+            return
+        }
+
+        isChangingBridge = true
+        feedbackText = nil
+        manager.uninstallBridge()
+        feedbackText = "自定义 Agent Bridge 已移除。"
+        isChangingBridge = false
+        refresh()
+    }
+
+    func copyBridgeCommand() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(
+            bridge.commandTemplate,
+            forType: .string
+        )
+        feedbackText = "Bridge 命令模板已复制。"
     }
 
     func install(_ provider: AgentIntegrationProvider) {

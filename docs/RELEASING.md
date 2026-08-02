@@ -36,7 +36,7 @@ file dist/AgentAwake.app/Contents/MacOS/AgentAwake
 
 1. 确认 `Resources/Info.plist`、README 与 Changelog 版本一致。
 2. 确认 `main` 的 CI 通过。
-3. 创建与版本一致的 Tag，例如 `v0.4.0`。
+3. 创建与版本一致的 Tag，例如 `v0.5.0`。
 4. 推送 Tag 后，`.github/workflows/release.yml` 无需 Secrets 即可自动发布两个
    DMG 和校验文件。
 5. 在一台干净的 Mac 上从 GitHub Release 真实下载并完成最终验收。

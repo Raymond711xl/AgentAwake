@@ -6,6 +6,9 @@ private enum SetupAction: String {
     case install
     case uninstall
     case status
+    case bridgeInstall = "bridge-install"
+    case bridgeUninstall = "bridge-uninstall"
+    case bridgeStatus = "bridge-status"
 }
 
 private enum SetupCommandError: LocalizedError {
@@ -16,9 +19,12 @@ private enum SetupCommandError: LocalizedError {
         switch self {
         case .usage:
             return """
-            用法：AgentAwakeHookSetup install|uninstall|status \
-            [--provider codex|claude] [--home 路径] \
-            [--helper AgentAwakeHook路径]
+            用法：
+              AgentAwakeHookSetup install|uninstall|status \
+                [--provider codex|claude] [--home 路径] \
+                [--helper AgentAwakeHook路径]
+              AgentAwakeHookSetup bridge-install|bridge-uninstall|bridge-status \
+                [--home 路径] [--helper AgentAwakeHook路径]
             """
         case let .invalidProvider(value):
             return "不支持的 Agent：\(value)"
@@ -117,6 +123,27 @@ do {
                 "\(snapshot.provider.displayName)：" +
                 stateDescription(snapshot.state)
             )
+        }
+
+    case .bridgeInstall:
+        try manager.installBridge()
+        print("自定义 Agent Bridge 已启用。")
+        print(manager.inspectBridge().commandTemplate)
+
+    case .bridgeUninstall:
+        manager.uninstallBridge()
+        print("自定义 Agent Bridge 已移除。")
+
+    case .bridgeStatus:
+        let snapshot = manager.inspectBridge()
+        switch snapshot.state {
+        case .available:
+            print("自定义 Agent Bridge：可选，尚未启用")
+        case .installed:
+            print("自定义 Agent Bridge：已启用")
+            print(snapshot.commandTemplate)
+        case .needsRepair:
+            print("自定义 Agent Bridge：需要修复或更新")
         }
     }
 } catch {

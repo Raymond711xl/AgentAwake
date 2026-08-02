@@ -15,11 +15,49 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Planned / 计划
 
-- 下一版本计划扩展对更多 Agent 的识别，并探索基于大模型 API 使用活动的任务
-  监测方案；具体支持范围会在实现与隐私边界验证完成后公布。
-  The next release is planned to recognize more agents and explore LLM API
-  activity as a task-monitoring signal; exact integrations will be announced
-  after implementation and privacy-boundary validation.
+- 下一阶段将按 OpenCode、Cursor、Cline/Kilo Code、Kimi/Qwen 的顺序，逐个研究并
+  验证第三方零配置适配器；在完成资源、隐私与生命周期验收前不宣称自动支持。
+  The next phase will research and verify zero-setup adapters one by one,
+  starting with OpenCode, Cursor, Cline/Kilo Code, and Kimi/Qwen. Automatic
+  support will not be claimed before resource, privacy, and lifecycle checks.
+
+## [0.5.0] - 2026-08-02
+
+### Added / 新增
+
+- 倒计时自然结束或最后一个 Agent 确认停止时，播放原创的“星眠”完成音；
+  设置中可关闭或试听，手动关闭与退出不会触发。
+  Play the original “Star Sleep” completion sound when a timer expires or the
+  last Agent is confirmed stopped. Settings can disable or preview it; manual
+  shutdown and app exit stay silent.
+- 可扩展的 Provider 身份、适配器解析规则、统一活动来源与置信度模型，并兼容旧版
+  Codex/Claude 租约。
+  Extensible provider identities, adapter-owned parsing rules, unified activity
+  sources and confidence, with legacy Codex/Claude lease compatibility.
+- 自定义 Agent Bridge：一次性 helper 支持 `start`、`heartbeat`、`stop`，
+  设置页可安装、修复、移除并复制命令模板。
+  A custom Agent Bridge whose one-shot helper supports `start`, `heartbeat`,
+  and `stop`, with install, repair, removal, and command copying in Settings.
+- 可重复的 RSS、CPU、线程与文件句柄采样脚本，以及事件驱动、缓存上限、旧租约和
+  Bridge 生命周期回归测试。
+  A repeatable RSS/CPU/thread/open-file sampler plus regression coverage for
+  native events, cache bounds, legacy leases, and Bridge lifecycle events.
+- Codex 与 Claude Code 保留无需 Hooks 的本地活动记录自动检测；Hooks 继续作为
+  可选的精确增强，而不是首次使用的前置条件。
+  Codex and Claude Code retain zero-configuration detection from local activity
+  records. Hooks remain an optional precision enhancement, not a prerequisite.
+
+### Changed / 变更
+
+- Agent 模式不再每 4 秒递归扫描日志；现在只在模式开启时创建一个共享 FSEvents
+  流，按目标文件读取新增字节，以 60 秒租约检查和 15 分钟完整校准兜底。
+  Agent mode no longer recursively scans logs every four seconds. It now uses
+  one shared FSEvents stream only while enabled, reads appended bytes by target
+  file, and falls back to 60-second lease checks and 15-minute reconciliation.
+- 设置页将自动检测与精确跟踪分层展示，并在修改 Codex/Claude 配置前显示目标路径、
+  新增命令和备份说明。
+  Settings now separates automatic and precise tracking and previews the target
+  path, command, and backup behavior before changing Codex or Claude config.
 
 ## [0.4.1] - 2026-08-01
 

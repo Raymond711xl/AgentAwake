@@ -14,6 +14,169 @@ private func expect(
     }
 }
 
+private struct MarkerAgentAdapter: AgentActivityAdapter {
+    let identity = AgentKind(
+        identifier: "marker-agent",
+        displayName: "Marker Agent"
+    )!
+    let logRoots: [URL]
+    let watchRoots: [URL]
+    let capabilities: Set<AgentDetectionCapability> = [.automaticLocal]
+
+    var bootstrapPatterns: [AgentActivityPattern] {
+        [
+            AgentActivityPattern(
+                data: Data("BEGIN_AGENT".utf8),
+                isActive: true
+            ),
+            AgentActivityPattern(
+                data: Data("END_AGENT".utf8),
+                isActive: false
+            )
+        ]
+    }
+
+    init(root: URL) {
+        logRoots = [root]
+        watchRoots = [root]
+    }
+
+    func updatedActivityState(
+        currentState: Bool,
+        line: Data
+    ) -> Bool {
+        if line.range(of: Data("BEGIN_AGENT".utf8)) != nil {
+            return true
+        }
+        if line.range(of: Data("END_AGENT".utf8)) != nil {
+            return false
+        }
+        return currentState
+    }
+
+    func sessionIdentifier(for activityURL: URL) -> String {
+        "marker:\(activityURL.deletingPathExtension().lastPathComponent)"
+    }
+}
+
+private func testExtensibleAgentIdentityAndEvents() {
+    guard let custom = AgentKind(
+        identifier: "Cursor_CLI",
+        displayName: "Cursor CLI"
+    ) else {
+        failures.append("合法的自定义 Agent 身份应可创建")
+        return
+    }
+
+    expect(custom.identifier == "cursor_cli", "Provider ID 应规范为小写")
+    expect(custom.displayName == "Cursor CLI", "显示名称应保持原文")
+    expect(
+        custom == AgentKind(
+            identifier: "cursor_cli",
+            displayName: "Cursor Agent"
+        ),
+        "同一 Provider ID 不应因显示名称变化而失去身份一致性"
+    )
+    expect(
+        AgentKind(identifier: "-invalid") == nil,
+        "Provider ID 必须以字母或数字开头"
+    )
+    expect(
+        AgentKind(identifier: "bad/provider") == nil,
+        "Provider ID 不应接受路径字符"
+    )
+
+    let legacyCodex = try? JSONDecoder().decode(
+        AgentKind.self,
+        from: Data(#""Codex""#.utf8)
+    )
+    expect(legacyCodex == .codex, "旧版字符串身份应继续解码")
+
+    if let encoded = try? JSONEncoder().encode(custom),
+       let decoded = try? JSONDecoder().decode(
+           AgentKind.self,
+           from: encoded
+       )
+    {
+        expect(decoded == custom, "自定义 Agent 身份应可往返编码")
+        expect(
+            decoded.displayName == custom.displayName,
+            "身份编码不应丢失显示名称"
+        )
+    } else {
+        failures.append("自定义 Agent 身份编码失败")
+    }
+
+    let occurredAt = Date(timeIntervalSince1970: 1_234)
+    let event = AgentActivityEvent(
+        provider: custom,
+        sessionID: "cursor-session",
+        activityID: "run-1",
+        kind: .start,
+        source: .preciseBridge,
+        occurredAt: occurredAt
+    )
+    expect(event?.occurredAt == occurredAt, "统一事件应保留发生时间")
+    expect(event?.source.confidence == .precise, "Bridge 事件应为精确来源")
+    expect(
+        AgentActivityEvent(
+            provider: custom,
+            sessionID: "bad\u{0000}session",
+            kind: .start,
+            source: .preciseBridge
+        ) == nil,
+        "统一事件应拒绝控制字符"
+    )
+}
+
+private func testCustomAdapterExtensionPoint() {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent(
+            "AgentAwakeCustomAdapterTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    defer {
+        try? fileManager.removeItem(at: root)
+    }
+    try? fileManager.createDirectory(
+        at: root,
+        withIntermediateDirectories: true
+    )
+    let log = root
+        .appendingPathComponent("custom-session")
+        .appendingPathExtension("jsonl")
+    try? Data("BEGIN_AGENT\n".utf8).write(to: log)
+
+    let adapter = MarkerAgentAdapter(root: root)
+    let detector = SystemAgentDetector(
+        hookActivityDirectory: root.appendingPathComponent("hooks"),
+        adapters: [adapter]
+    )
+    let active = detector.runningAgents(forceReconciliation: true)
+    expect(active.first?.kind == adapter.identity, "自定义适配器应被核心发现")
+    expect(
+        active.first?.sessionID == "marker:custom-session",
+        "会话标识规则应由适配器控制"
+    )
+
+    if let handle = try? FileHandle(forWritingTo: log) {
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data("END_AGENT\n".utf8))
+        try? handle.close()
+    }
+    detector.recordFileEvents(
+        FileSystemActivityBatch(
+            urls: [log],
+            requiresFullReconciliation: false
+        )
+    )
+    expect(
+        detector.runningAgents().isEmpty,
+        "自定义适配器应独立解析结束状态"
+    )
+}
+
 private func testProtectionSession() {
     let now = Date(timeIntervalSince1970: 1_000)
 
@@ -271,6 +434,158 @@ private func testHookActivityStore() {
     )
 }
 
+private func testLegacyLeaseAndCustomBridge() {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent(
+            "AgentAwakeLegacyLeaseTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    defer {
+        try? fileManager.removeItem(at: root)
+    }
+    try? fileManager.createDirectory(
+        at: root,
+        withIntermediateDirectories: true
+    )
+
+    let now = Date(timeIntervalSince1970: 3_000)
+    let legacyRecord: [String: Any] = [
+        "schemaVersion": 1,
+        "kind": "Codex",
+        "sessionID": "legacy-session",
+        "activityID": "legacy-turn",
+        "state": "active",
+        "lastEventName": "PostToolUse",
+        "updatedAt": ISO8601DateFormatter().string(from: now)
+    ]
+    if let data = try? JSONSerialization.data(withJSONObject: legacyRecord) {
+        try? data.write(
+            to: root.appendingPathComponent("legacy.json"),
+            options: .atomic
+        )
+    }
+
+    let store = AgentHookActivityStore(
+        rootDirectory: root,
+        activeLeaseTimeout: 60,
+        inactiveAuthorityWindow: 300
+    )
+    let legacySnapshot = store.snapshot(now: now)
+    expect(
+        legacySnapshot.activeAgents.first?.kind == .codex,
+        "旧版 Codex 租约应继续识别"
+    )
+    expect(
+        legacySnapshot.activeAgents.first?.source == .preciseHook,
+        "旧版租约应迁移为精确 Hook 来源"
+    )
+
+    let futureRecord: [String: Any] = [
+        "schemaVersion": 1,
+        "kind": "Claude",
+        "sessionID": "future-session",
+        "activityID": "future-turn",
+        "state": "active",
+        "lastEventName": "PostToolUse",
+        "updatedAt": ISO8601DateFormatter().string(
+            from: now.addingTimeInterval(86_400)
+        )
+    ]
+    let futureURL = root.appendingPathComponent("future.json")
+    if let data = try? JSONSerialization.data(withJSONObject: futureRecord) {
+        try? data.write(to: futureURL, options: .atomic)
+    }
+    let futureSnapshot = store.snapshot(now: now)
+    expect(
+        !futureSnapshot.activeAgents.contains { $0.kind == .claude },
+        "未来时间戳租约不应造成永久唤醒"
+    )
+    expect(
+        !fileManager.fileExists(atPath: futureURL.path),
+        "异常未来租约应从本地缓存清理"
+    )
+
+    let oversizedURL = root.appendingPathComponent("oversized.json")
+    try? Data(repeating: 0x78, count: 20_000).write(to: oversizedURL)
+    _ = store.snapshot(now: now)
+    expect(
+        !fileManager.fileExists(atPath: oversizedURL.path),
+        "异常大租约文件不应进入内存"
+    )
+
+    guard let custom = AgentKind(
+        identifier: "cursor",
+        displayName: "Cursor"
+    ),
+    let start = AgentActivityEvent(
+        provider: custom,
+        sessionID: "cursor-session",
+        activityID: "cursor-run",
+        kind: .start,
+        source: .preciseBridge,
+        eventName: "BridgeStart",
+        occurredAt: now
+    ) else {
+        failures.append("自定义 Bridge 测试事件创建失败")
+        return
+    }
+
+    do {
+        try store.handle(event: start, now: now)
+    } catch {
+        failures.append("Bridge start 写入失败：\(error.localizedDescription)")
+    }
+    let activeSnapshot = store.snapshot(now: now)
+    let bridgeAgent = activeSnapshot.activeAgents.first {
+        $0.kind.identifier == custom.identifier
+    }
+    expect(bridgeAgent?.kind.displayName == "Cursor", "Bridge 应保留显示名称")
+    expect(
+        bridgeAgent?.source == .preciseBridge,
+        "Bridge 租约应标记为 preciseBridge"
+    )
+
+    guard let stop = AgentActivityEvent(
+        provider: AgentKind(
+            identifier: "cursor",
+            displayName: "Cursor Agent"
+        )!,
+        sessionID: "cursor-session",
+        activityID: "cursor-run",
+        kind: .stop,
+        source: .preciseBridge,
+        eventName: "BridgeStop",
+        occurredAt: now.addingTimeInterval(1)
+    ) else {
+        failures.append("自定义 Bridge stop 事件创建失败")
+        return
+    }
+    do {
+        try store.handle(
+            event: stop,
+            now: now.addingTimeInterval(1)
+        )
+    } catch {
+        failures.append("Bridge stop 写入失败：\(error.localizedDescription)")
+    }
+    let stoppedSnapshot = store.snapshot(
+        now: now.addingTimeInterval(2)
+    )
+    expect(
+        stoppedSnapshot.activeAgents.allSatisfy {
+            $0.kind.identifier != custom.identifier
+        },
+        "Bridge stop 应释放自定义 Agent"
+    )
+    expect(
+        stoppedSnapshot.authoritativeSessions.contains(
+            AgentSessionKey(kind: custom, sessionID: "cursor-session")
+        ),
+        "精确 stop 应对同一 Provider ID 保持权威"
+    )
+}
+
 private func testHookOverridesTranscriptFallback() {
     let fileManager = FileManager.default
     let home = fileManager.temporaryDirectory
@@ -327,6 +642,226 @@ private func testHookOverridesTranscriptFallback() {
     expect(
         detector.runningAgents().isEmpty,
         "同一会话收到 Hook Stop 后应覆盖滞后的日志状态"
+    )
+}
+
+private func testEventDrivenDetectorAndResourceBounds() {
+    let fileManager = FileManager.default
+    let home = fileManager.temporaryDirectory
+        .appendingPathComponent(
+            "AgentAwakeEventDetectorTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    defer {
+        try? fileManager.removeItem(at: home)
+    }
+
+    let codexHome = home.appendingPathComponent(".codex", isDirectory: true)
+    let sessions = codexHome.appendingPathComponent(
+        "sessions",
+        isDirectory: true
+    )
+    try? fileManager.createDirectory(
+        at: sessions,
+        withIntermediateDirectories: true
+    )
+    let primaryLog = sessions
+        .appendingPathComponent("primary-session")
+        .appendingPathExtension("jsonl")
+    try? Data(
+        (#"{"type":"event_msg","payload":{"type":"task_started"}}"# + "\n")
+            .utf8
+    ).write(to: primaryLog)
+
+    let hookRoot = home.appendingPathComponent(
+        "hook-activity",
+        isDirectory: true
+    )
+    let detector = SystemAgentDetector(
+        homeDirectory: home,
+        hookActivityDirectory: hookRoot,
+        maximumCachedSessions: 4,
+        maximumTotalBufferBytes: 4_096,
+        maximumPartialLineBytes: 1_024
+    )
+
+    let firstResult = detector.runningAgents(forceReconciliation: true)
+    let firstMetrics = detector.metrics()
+    expect(firstResult.count == 1, "首次校准应发现 Codex 活动")
+    expect(
+        firstMetrics.fullReconciliationCount == 1,
+        "首次检测应只执行一次完整校准"
+    )
+    expect(
+        firstMetrics.monitoredPathCount == 0,
+        "未显式启用 Agent 监听时不应创建文件事件流"
+    )
+
+    if let handle = try? FileHandle(forWritingTo: primaryLog) {
+        _ = try? handle.seekToEnd()
+        try? handle.write(
+            contentsOf: Data(
+                (#"{"type":"event_msg","payload":{"type":"task_complete"}}"# + "\n")
+                    .utf8
+            )
+        )
+        try? handle.close()
+    }
+    detector.recordFileEvents(
+        FileSystemActivityBatch(
+            urls: [primaryLog],
+            requiresFullReconciliation: false
+        )
+    )
+    let incrementalResult = detector.runningAgents()
+    let incrementalMetrics = detector.metrics()
+    expect(incrementalResult.isEmpty, "增量追加的结束事件应停止 Agent")
+    expect(
+        incrementalMetrics.fullReconciliationCount
+            == firstMetrics.fullReconciliationCount,
+        "普通文件追加不应触发递归校准"
+    )
+    expect(
+        incrementalMetrics.targetedFileUpdateCount == 1,
+        "普通文件追加应只更新目标日志"
+    )
+
+    let nestedDirectory = sessions.appendingPathComponent(
+        "new-directory",
+        isDirectory: true
+    )
+    try? fileManager.createDirectory(
+        at: nestedDirectory,
+        withIntermediateDirectories: true
+    )
+    let nestedLog = nestedDirectory
+        .appendingPathComponent("nested-session")
+        .appendingPathExtension("jsonl")
+    try? Data(
+        (#"{"type":"event_msg","payload":{"type":"task_started"}}"# + "\n")
+            .utf8
+    ).write(to: nestedLog)
+    detector.recordFileEvents(
+        FileSystemActivityBatch(
+            urls: [nestedDirectory],
+            requiresFullReconciliation: false
+        )
+    )
+    let directoryResult = detector.runningAgents()
+    expect(
+        directoryResult.contains { $0.sessionID == "nested-session" },
+        "新建日志目录应触发完整校准兜底"
+    )
+
+    let beforeDroppedEvent = detector.metrics().fullReconciliationCount
+    detector.recordFileEvents(
+        FileSystemActivityBatch(
+            urls: [],
+            requiresFullReconciliation: true
+        )
+    )
+    _ = detector.runningAgents()
+    expect(
+        detector.metrics().fullReconciliationCount
+            == beforeDroppedEvent + 1,
+        "文件事件丢失标记应触发完整校准"
+    )
+
+    for index in 0..<12 {
+        let log = sessions
+            .appendingPathComponent("bounded-\(index)")
+            .appendingPathExtension("jsonl")
+        try? Data(
+            (#"{"type":"event_msg","payload":{"type":"task_started"}}"# + "\n")
+                .utf8
+        ).write(to: log)
+    }
+    let boundedResult = detector.runningAgents(forceReconciliation: true)
+    let boundedMetrics = detector.metrics()
+    expect(
+        boundedMetrics.cachedSessionCount <= 4,
+        "会话缓存不得突破配置上限"
+    )
+
+    if let retainedLogPath = boundedResult.first?.activityLogPath,
+       let handle = try? FileHandle(
+           forWritingTo: URL(fileURLWithPath: retainedLogPath)
+       )
+    {
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data(repeating: 0x78, count: 32_768))
+        try? handle.close()
+        detector.recordFileEvents(
+            FileSystemActivityBatch(
+                urls: [URL(fileURLWithPath: retainedLogPath)],
+                requiresFullReconciliation: false
+            )
+        )
+        _ = detector.runningAgents()
+    }
+    expect(
+        detector.metrics().bufferedByteCount <= 4_096,
+        "异常长记录不得突破总增量缓冲区上限"
+    )
+
+    let nativeEvent = DispatchSemaphore(value: 0)
+    detector.startMonitoring {
+        nativeEvent.signal()
+    }
+    let initialMonitoredPathCount = detector.metrics().monitoredPathCount
+    if initialMonitoredPathCount > 0 {
+        expect(
+            initialMonitoredPathCount == 2,
+            "自动检测应只监听现有 Agent 根目录和租约目录（实际 \(initialMonitoredPathCount)）"
+        )
+        let eventProbe = sessions.appendingPathComponent("event-probe.tmp")
+        try? Data("probe".utf8).write(to: eventProbe)
+        expect(
+            nativeEvent.wait(timeout: .now() + 4) == .success,
+            "原生文件事件流应收到 Agent 目录变化"
+        )
+        _ = detector.runningAgents()
+    }
+
+    let claudeProjects = home
+        .appendingPathComponent(".claude", isDirectory: true)
+        .appendingPathComponent("projects", isDirectory: true)
+    try? fileManager.createDirectory(
+        at: claudeProjects,
+        withIntermediateDirectories: true
+    )
+    let claudeLog = claudeProjects
+        .appendingPathComponent("claude-session")
+        .appendingPathExtension("jsonl")
+    try? Data(
+        (#"{"type":"user","message":{"role":"user"}}"# + "\n").utf8
+    ).write(to: claudeLog)
+    let beforeNewRoot = detector.metrics().fullReconciliationCount
+    let newRootResult = detector.runningAgents()
+    expect(
+        newRootResult.contains { $0.kind == .claude },
+        "运行期间新出现的 Agent 根目录应在轻量检查后纳入检测"
+    )
+    expect(
+        detector.metrics().fullReconciliationCount == beforeNewRoot + 1,
+        "新增监听根目录应执行一次校准"
+    )
+    let expandedMonitoredPathCount = detector.metrics().monitoredPathCount
+    if initialMonitoredPathCount > 0 {
+        expect(
+            expandedMonitoredPathCount == 3,
+            "新增 Agent 应扩展同一个事件流（实际 \(expandedMonitoredPathCount)）"
+        )
+    } else {
+        expect(
+            expandedMonitoredPathCount == 0,
+            "原生事件不可用时应保持退避校准模式"
+        )
+    }
+    detector.stopMonitoring()
+    expect(
+        detector.metrics().monitoredPathCount == 0,
+        "停止 Agent 模式后应释放文件事件流"
     )
 }
 
@@ -558,11 +1093,121 @@ private func testSelectiveIntegrationSetup() {
     }
 }
 
+private func testBridgeSetupLifecycle() {
+    let fileManager = FileManager.default
+    let root = fileManager.temporaryDirectory
+        .appendingPathComponent(
+            "AgentAwakeBridgeSetupTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    defer {
+        try? fileManager.removeItem(at: root)
+    }
+    try? fileManager.createDirectory(
+        at: root,
+        withIntermediateDirectories: true
+    )
+
+    let helperURL = root.appendingPathComponent("BundledAgentAwakeHook")
+    try? Data("agentawake-bridge-helper".utf8).write(to: helperURL)
+    try? fileManager.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: helperURL.path
+    )
+    let manager = AgentIntegrationManager(
+        homeDirectory: root,
+        bundledHelperURL: helperURL
+    )
+
+    expect(
+        manager.inspectBridge().state == .available,
+        "Bridge 初始状态应为可选"
+    )
+    do {
+        try manager.installBridge()
+        try manager.installBridge()
+    } catch {
+        failures.append("Bridge 安装或重复安装失败：\(error.localizedDescription)")
+    }
+
+    let installed = manager.inspectBridge()
+    expect(installed.state == .installed, "Bridge 安装后应可用")
+    expect(
+        installed.commandTemplate.contains("--event EVENT"),
+        "Bridge 应提供统一的一行事件模板"
+    )
+    expect(
+        fileManager.isExecutableFile(atPath: installed.helperPath),
+        "Bridge helper 应保持可执行"
+    )
+    expect(
+        !fileManager.fileExists(
+            atPath: manager.bridgeMarkerURL.path + ".agentawake-backup"
+        ),
+        "Bridge 自有状态文件不应产生冗余备份"
+    )
+
+    try? Data(#"{"enabled":"invalid"}"#.utf8).write(
+        to: manager.bridgeMarkerURL,
+        options: .atomic
+    )
+    expect(
+        manager.inspectBridge().state == .needsRepair,
+        "损坏的 Bridge 状态文件应显示需要修复"
+    )
+    do {
+        try manager.installBridge()
+    } catch {
+        failures.append("Bridge 状态修复失败：\(error.localizedDescription)")
+    }
+    expect(
+        manager.inspectBridge().state == .installed,
+        "重新安装应修复 Bridge 状态文件"
+    )
+
+    let codexSessions = root
+        .appendingPathComponent(".codex", isDirectory: true)
+        .appendingPathComponent("sessions", isDirectory: true)
+    try? fileManager.createDirectory(
+        at: codexSessions,
+        withIntermediateDirectories: true
+    )
+    do {
+        try manager.install(.codex)
+    } catch {
+        failures.append("Bridge 共存测试的 Codex Hooks 安装失败")
+    }
+
+    manager.uninstallBridge()
+    expect(
+        manager.inspectBridge().state == .available,
+        "Bridge 移除后应回到可选状态"
+    )
+    expect(
+        fileManager.fileExists(atPath: manager.installedHelperURL.path),
+        "Hooks 仍在使用时，移除 Bridge 不应删除共享 helper"
+    )
+    do {
+        try manager.uninstall(.codex)
+    } catch {
+        failures.append("Bridge 共存测试的 Codex Hooks 移除失败")
+    }
+    expect(
+        !fileManager.fileExists(atPath: manager.installedHelperURL.path),
+        "Bridge 与 Hooks 都移除后应清理共享 helper"
+    )
+}
+
 testProtectionSession()
+testExtensibleAgentIdentityAndEvents()
+testCustomAdapterExtensionPoint()
 testAgentActivityParsing()
 testHookActivityStore()
+testLegacyLeaseAndCustomBridge()
 testHookOverridesTranscriptFallback()
+testEventDrivenDetectorAndResourceBounds()
 testSelectiveIntegrationSetup()
+testBridgeSetupLifecycle()
 
 if failures.isEmpty {
     let detector = SystemAgentDetector()

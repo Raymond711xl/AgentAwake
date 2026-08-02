@@ -76,6 +76,7 @@ public struct AgentIntegrationSnapshot: Identifiable, Equatable, Sendable {
     public let state: AgentIntegrationState
     public let hasLocalActivityData: Bool
     public let configurationPath: String
+    public let commandPreview: String
 
     public var id: String { provider.id }
 
@@ -83,12 +84,36 @@ public struct AgentIntegrationSnapshot: Identifiable, Equatable, Sendable {
         provider: AgentIntegrationProvider,
         state: AgentIntegrationState,
         hasLocalActivityData: Bool,
-        configurationPath: String
+        configurationPath: String,
+        commandPreview: String = ""
     ) {
         self.provider = provider
         self.state = state
         self.hasLocalActivityData = hasLocalActivityData
         self.configurationPath = configurationPath
+        self.commandPreview = commandPreview
+    }
+}
+
+public enum AgentBridgeState: Equatable, Sendable {
+    case available
+    case installed
+    case needsRepair
+}
+
+public struct AgentBridgeSnapshot: Equatable, Sendable {
+    public let state: AgentBridgeState
+    public let helperPath: String
+    public let commandTemplate: String
+
+    public init(
+        state: AgentBridgeState,
+        helperPath: String,
+        commandTemplate: String
+    ) {
+        self.state = state
+        self.helperPath = helperPath
+        self.commandTemplate = commandTemplate
     }
 }
 
@@ -140,12 +165,81 @@ public final class AgentIntegrationManager: @unchecked Sendable {
             .appendingPathComponent("AgentAwakeHook")
     }
 
+    public var bridgeMarkerURL: URL {
+        installedHelperURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("bridge-enabled.json")
+    }
+
+    public var bridgeCommandTemplate: String {
+        [
+            singleQuotedShellArgument(installedHelperURL.path),
+            "bridge",
+            "--provider custom-agent",
+            "--display-name 'Custom Agent'",
+            "--session SESSION_ID",
+            "--event EVENT"
+        ].joined(separator: " ")
+    }
+
     public func detectedProviders() -> [AgentIntegrationProvider] {
         AgentIntegrationProvider.allCases.filter(isDetected)
     }
 
     public func inspectAll() -> [AgentIntegrationSnapshot] {
         AgentIntegrationProvider.allCases.map(inspect)
+    }
+
+    public func inspectBridge() -> AgentBridgeSnapshot {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let enabled = fileManager.fileExists(atPath: bridgeMarkerURL.path)
+        let state: AgentBridgeState
+        if !enabled {
+            state = .available
+        } else {
+            state = bridgeMarkerIsValid() && helperMatchesBundledVersion()
+                ? .installed
+                : .needsRepair
+        }
+        return AgentBridgeSnapshot(
+            state: state,
+            helperPath: installedHelperURL.path,
+            commandTemplate: bridgeCommandTemplate
+        )
+    }
+
+    public func installBridge() throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        do {
+            _ = try installStableHelper()
+            let marker: [String: Any] = [
+                "schemaVersion": 1,
+                "enabled": true
+            ]
+            try writeBridgeMarker(marker)
+        } catch {
+            if !hasAnyConfiguredIntegrationUnlocked() {
+                try? fileManager.removeItem(at: installedHelperURL)
+            }
+            throw error
+        }
+    }
+
+    public func uninstallBridge() {
+        lock.lock()
+        defer { lock.unlock() }
+
+        try? fileManager.removeItem(at: bridgeMarkerURL)
+        try? fileManager.removeItem(
+            at: URL(fileURLWithPath: bridgeMarkerURL.path + ".agentawake-backup")
+        )
+        if !hasAnyConfiguredIntegrationUnlocked() {
+            try? fileManager.removeItem(at: installedHelperURL)
+        }
     }
 
     public func inspect(
@@ -227,6 +321,7 @@ public final class AgentIntegrationManager: @unchecked Sendable {
         _ provider: AgentIntegrationProvider
     ) -> AgentIntegrationSnapshot {
         let configURL = configurationURL(for: provider)
+        let commandPreview = preciseCommandPreview(for: provider)
         let hasLocalActivityData = fileManager.fileExists(
             atPath: activityDirectoryURL(provider).path
         )
@@ -236,7 +331,8 @@ public final class AgentIntegrationManager: @unchecked Sendable {
                 provider: provider,
                 state: .notDetected,
                 hasLocalActivityData: false,
-                configurationPath: configURL.path
+                configurationPath: configURL.path,
+                commandPreview: commandPreview
             )
         }
 
@@ -245,7 +341,8 @@ public final class AgentIntegrationManager: @unchecked Sendable {
                 provider: provider,
                 state: .available,
                 hasLocalActivityData: hasLocalActivityData,
-                configurationPath: configURL.path
+                configurationPath: configURL.path,
+                commandPreview: commandPreview
             )
         }
 
@@ -261,7 +358,8 @@ public final class AgentIntegrationManager: @unchecked Sendable {
                     provider: provider,
                     state: .available,
                     hasLocalActivityData: hasLocalActivityData,
-                    configurationPath: configURL.path
+                    configurationPath: configURL.path,
+                    commandPreview: commandPreview
                 )
             }
 
@@ -270,14 +368,16 @@ public final class AgentIntegrationManager: @unchecked Sendable {
                 provider: provider,
                 state: helperIsCurrent ? .installed : .needsRepair,
                 hasLocalActivityData: hasLocalActivityData,
-                configurationPath: configURL.path
+                configurationPath: configURL.path,
+                commandPreview: commandPreview
             )
         } catch {
             return AgentIntegrationSnapshot(
                 provider: provider,
                 state: .invalidConfiguration(error.localizedDescription),
                 hasLocalActivityData: hasLocalActivityData,
-                configurationPath: configURL.path
+                configurationPath: configURL.path,
+                commandPreview: commandPreview
             )
         }
     }
@@ -314,6 +414,18 @@ public final class AgentIntegrationManager: @unchecked Sendable {
         }
 
         return bundledData == installedData
+    }
+
+    private func bridgeMarkerIsValid() -> Bool {
+        guard let data = try? Data(contentsOf: bridgeMarkerURL),
+              let object = try? JSONSerialization.jsonObject(with: data)
+                  as? [String: Any],
+              object["schemaVersion"] as? Int == 1,
+              object["enabled"] as? Bool == true
+        else {
+            return false
+        }
+        return true
     }
 
     private func installStableHelper() throws -> URL {
@@ -515,6 +627,23 @@ public final class AgentIntegrationManager: @unchecked Sendable {
         )
     }
 
+    private func writeBridgeMarker(_ object: [String: Any]) throws {
+        try fileManager.createDirectory(
+            at: bridgeMarkerURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        var data = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.prettyPrinted, .sortedKeys]
+        )
+        data.append(0x0A)
+        try data.write(to: bridgeMarkerURL, options: .atomic)
+        try? fileManager.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: bridgeMarkerURL.path
+        )
+    }
+
     private func handler(
         for provider: AgentIntegrationProvider,
         helperPath: String
@@ -547,26 +676,62 @@ public final class AgentIntegrationManager: @unchecked Sendable {
         }
     }
 
+    private func preciseCommandPreview(
+        for provider: AgentIntegrationProvider
+    ) -> String {
+        switch provider {
+        case .codex:
+            return [
+                singleQuotedShellArgument(installedHelperURL.path),
+                "--provider codex",
+                "--adapter-id \(Self.adapterID)"
+            ].joined(separator: " ")
+        case .claude:
+            return [
+                singleQuotedShellArgument(installedHelperURL.path),
+                "--provider claude",
+                "--adapter-id \(Self.adapterID)"
+            ].joined(separator: " ")
+        }
+    }
+
     private func singleQuotedShellArgument(_ value: String) -> String {
         "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     private func hasAnyConfiguredIntegrationUnlocked() -> Bool {
-        AgentIntegrationProvider.allCases.contains { provider in
+        if fileManager.fileExists(atPath: bridgeMarkerURL.path) {
+            return true
+        }
+
+        return AgentIntegrationProvider.allCases.contains { provider in
             let configURL = configurationURL(for: provider)
-            guard fileManager.fileExists(atPath: configURL.path),
-                  let root = try? loadJSONObject(
-                    at: configURL,
-                    defaultValue: [:]
-                  )
-            else {
+            guard fileManager.fileExists(atPath: configURL.path) else {
                 return false
             }
-            return (try? hasAgentAwakeHandler(
+
+            if let root = try? loadJSONObject(
+                at: configURL,
+                defaultValue: [:]
+            ),
+            (try? hasAgentAwakeHandler(
                 in: root,
                 provider: provider,
                 configPath: configURL.path
             )) == true
+            {
+                return true
+            }
+
+            // If the config became malformed after installation, preserve the
+            // helper whenever the raw marker is still present. Removing it
+            // would leave the host Agent pointing at a missing executable.
+            guard let data = try? Data(contentsOf: configURL),
+                  let text = String(data: data, encoding: .utf8)
+            else {
+                return false
+            }
+            return text.contains(Self.adapterID)
         }
     }
 }

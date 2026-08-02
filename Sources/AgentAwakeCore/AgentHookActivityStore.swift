@@ -70,6 +70,14 @@ public struct AgentHookEvent: Decodable, Sendable {
     }
 }
 
+public enum AgentActivityStoreError: LocalizedError {
+    case invalidEvent
+
+    public var errorDescription: String? {
+        "Agent 活动事件缺少必要字段或字段不安全。"
+    }
+}
+
 public final class AgentHookActivityStore: @unchecked Sendable {
     private enum LeaseState: String, Codable {
         case active
@@ -82,13 +90,108 @@ public final class AgentHookActivityStore: @unchecked Sendable {
         let sessionID: String
         let activityID: String
         var state: LeaseState
+        let source: AgentStatusSource
         var lastEventName: String
         var updatedAt: Date
+
+        private enum CodingKeys: String, CodingKey {
+            case schemaVersion
+            case kind
+            case providerID
+            case displayName
+            case sessionID
+            case activityID
+            case state
+            case source
+            case lastEventName
+            case updatedAt
+        }
+
+        init(
+            schemaVersion: Int,
+            kind: AgentKind,
+            sessionID: String,
+            activityID: String,
+            state: LeaseState,
+            source: AgentStatusSource,
+            lastEventName: String,
+            updatedAt: Date
+        ) {
+            self.schemaVersion = schemaVersion
+            self.kind = kind
+            self.sessionID = sessionID
+            self.activityID = activityID
+            self.state = state
+            self.source = source
+            self.lastEventName = lastEventName
+            self.updatedAt = updatedAt
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            schemaVersion = try container.decodeIfPresent(
+                Int.self,
+                forKey: .schemaVersion
+            ) ?? 1
+
+            if let providerID = try container.decodeIfPresent(
+                String.self,
+                forKey: .providerID
+            ) {
+                let displayName = try container.decodeIfPresent(
+                    String.self,
+                    forKey: .displayName
+                )
+                guard let provider = AgentKind(
+                    identifier: providerID,
+                    displayName: displayName
+                ) else {
+                    throw DecodingError.dataCorruptedError(
+                        forKey: .providerID,
+                        in: container,
+                        debugDescription: "Invalid provider identity."
+                    )
+                }
+                kind = provider
+            } else {
+                kind = try container.decode(AgentKind.self, forKey: .kind)
+            }
+
+            sessionID = try container.decode(String.self, forKey: .sessionID)
+            activityID = try container.decode(
+                String.self,
+                forKey: .activityID
+            )
+            state = try container.decode(LeaseState.self, forKey: .state)
+            source = try container.decodeIfPresent(
+                AgentStatusSource.self,
+                forKey: .source
+            ) ?? .preciseHook
+            lastEventName = try container.decode(
+                String.self,
+                forKey: .lastEventName
+            )
+            updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(2, forKey: .schemaVersion)
+            try container.encode(kind.identifier, forKey: .providerID)
+            try container.encode(kind.displayName, forKey: .displayName)
+            try container.encode(sessionID, forKey: .sessionID)
+            try container.encode(activityID, forKey: .activityID)
+            try container.encode(state, forKey: .state)
+            try container.encode(source, forKey: .source)
+            try container.encode(lastEventName, forKey: .lastEventName)
+            try container.encode(updatedAt, forKey: .updatedAt)
+        }
     }
 
     public let rootDirectory: URL
     public let activeLeaseTimeout: TimeInterval
     public let inactiveAuthorityWindow: TimeInterval
+    public let maximumLeaseRecords: Int
 
     private let fileManager: FileManager
     private let decoder: JSONDecoder
@@ -99,11 +202,13 @@ public final class AgentHookActivityStore: @unchecked Sendable {
         rootDirectory: URL = AgentHookActivityStore.defaultRootDirectory(),
         activeLeaseTimeout: TimeInterval = 1_800,
         inactiveAuthorityWindow: TimeInterval = 86_400,
+        maximumLeaseRecords: Int = 128,
         fileManager: FileManager = .default
     ) {
         self.rootDirectory = rootDirectory
         self.activeLeaseTimeout = activeLeaseTimeout
         self.inactiveAuthorityWindow = inactiveAuthorityWindow
+        self.maximumLeaseRecords = min(max(1, maximumLeaseRecords), 1_024)
         self.fileManager = fileManager
 
         let decoder = JSONDecoder()
@@ -126,96 +231,76 @@ public final class AgentHookActivityStore: @unchecked Sendable {
             .appendingPathComponent("AgentActivity", isDirectory: true)
     }
 
+    public func prepareDirectory() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        try ensureRootDirectory()
+    }
+
     @discardableResult
     public func handle(
         provider: AgentKind,
         input: Data,
         now: Date = Date()
     ) throws -> AgentHookEventAction {
-        let event = try decoder.decode(AgentHookEvent.self, from: input)
-        let action = event.action
-
+        let hookEvent = try decoder.decode(AgentHookEvent.self, from: input)
+        let action = hookEvent.action
         guard action != .ignore else {
             return action
         }
 
-        lock.lock()
-        defer { lock.unlock() }
-
-        try ensureRootDirectory()
-
+        let kind: AgentActivityEventKind
         switch action {
         case .activate:
-            try deactivateOtherActivities(
-                provider: provider,
-                sessionID: event.sessionID,
-                keeping: event.activityID,
-                eventName: event.hookEventName,
-                now: now
-            )
-            try upsertActiveLease(
-                provider: provider,
-                event: event,
-                now: now
-            )
-
+            kind = .start
         case .heartbeat:
-            try upsertActiveLease(
-                provider: provider,
-                event: event,
-                now: now
-            )
-
-        case .deactivate:
-            try deactivate(
-                provider: provider,
-                event: event,
-                now: now
-            )
-
-        case .deactivateSession:
-            try deactivateSession(
-                provider: provider,
-                sessionID: event.sessionID,
-                eventName: event.hookEventName,
-                now: now
-            )
-
+            kind = .heartbeat
+        case .deactivate, .deactivateSession:
+            kind = .stop
         case .ignore:
-            break
+            return .ignore
         }
 
-        return action
+        guard let event = AgentActivityEvent(
+            provider: provider,
+            sessionID: hookEvent.sessionID,
+            activityID: hookEvent.activityID,
+            kind: kind,
+            source: .preciseHook,
+            eventName: hookEvent.hookEventName
+        ) else {
+            throw AgentActivityStoreError.invalidEvent
+        }
+        return try handleResolved(event, action: action, now: now)
+    }
+
+    @discardableResult
+    public func handle(
+        event: AgentActivityEvent,
+        now: Date = Date()
+    ) throws -> AgentHookEventAction {
+        let action: AgentHookEventAction
+        switch event.kind {
+        case .start:
+            action = .activate
+        case .heartbeat:
+            action = .heartbeat
+        case .stop:
+            action = .deactivate
+        }
+        return try handleResolved(event, action: action, now: now)
     }
 
     public func snapshot(now: Date = Date()) -> AgentHookSnapshot {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let urls = try? fileManager.contentsOfDirectory(
-            at: rootDirectory,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ) else {
-            return AgentHookSnapshot(
-                activeAgents: [],
-                authoritativeSessions: []
-            )
-        }
-
+        let records = recentRecords(now: now)
         var activeAgents: [RunningAgent] = []
         var authoritativeSessions: Set<AgentSessionKey> = []
 
-        for url in urls where url.pathExtension == "json" {
-            guard let data = try? Data(contentsOf: url),
-                  let record = try? decoder.decode(
-                      LeaseRecord.self,
-                      from: data
-                  )
-            else {
-                continue
-            }
-
+        for item in records {
+            let record = item.record
             let age = max(0, now.timeIntervalSince(record.updatedAt))
             let key = AgentSessionKey(
                 kind: record.kind,
@@ -229,14 +314,12 @@ public final class AgentHookActivityStore: @unchecked Sendable {
                     RunningAgent(
                         kind: record.kind,
                         sessionID: record.sessionID,
-                        activityLogPath: url.path,
-                        source: .lifecycleHook
+                        activityLogPath: item.url.path,
+                        source: record.source
                     )
                 )
-
             case .inactive where age <= inactiveAuthorityWindow:
                 authoritativeSessions.insert(key)
-
             default:
                 continue
             }
@@ -246,6 +329,44 @@ public final class AgentHookActivityStore: @unchecked Sendable {
             activeAgents: activeAgents.sorted(by: Self.agentSort),
             authoritativeSessions: authoritativeSessions
         )
+    }
+
+    private func handleResolved(
+        _ event: AgentActivityEvent,
+        action: AgentHookEventAction,
+        now: Date
+    ) throws -> AgentHookEventAction {
+        lock.lock()
+        defer { lock.unlock() }
+        try ensureRootDirectory()
+
+        switch action {
+        case .activate:
+            try deactivateOtherActivities(
+                provider: event.provider,
+                sessionID: event.sessionID,
+                keeping: event.activityID,
+                eventName: event.eventName,
+                now: now
+            )
+            try upsertActiveLease(event: event, now: now)
+        case .heartbeat:
+            try upsertActiveLease(event: event, now: now)
+        case .deactivate:
+            try deactivate(event: event, now: now)
+        case .deactivateSession:
+            try deactivateSession(
+                provider: event.provider,
+                sessionID: event.sessionID,
+                eventName: event.eventName,
+                source: event.source,
+                now: now
+            )
+        case .ignore:
+            break
+        }
+
+        return action
     }
 
     private func ensureRootDirectory() throws {
@@ -260,41 +381,38 @@ public final class AgentHookActivityStore: @unchecked Sendable {
     }
 
     private func upsertActiveLease(
-        provider: AgentKind,
-        event: AgentHookEvent,
+        event: AgentActivityEvent,
         now: Date
     ) throws {
         let activityID = event.activityID ?? event.sessionID
         let record = LeaseRecord(
-            schemaVersion: 1,
-            kind: provider,
+            schemaVersion: 2,
+            kind: event.provider,
             sessionID: event.sessionID,
             activityID: activityID,
             state: .active,
-            lastEventName: event.hookEventName,
+            source: event.source,
+            lastEventName: event.eventName,
             updatedAt: now
         )
         try write(record)
     }
 
     private func deactivate(
-        provider: AgentKind,
-        event: AgentHookEvent,
+        event: AgentActivityEvent,
         now: Date
     ) throws {
         if let activityID = event.activityID {
             let url = recordURL(
-                provider: provider,
+                provider: event.provider,
                 sessionID: event.sessionID
             )
-
             if var record = readRecord(at: url) {
                 guard record.activityID == activityID else {
                     return
                 }
-
                 record.state = .inactive
-                record.lastEventName = event.hookEventName
+                record.lastEventName = event.eventName
                 record.updatedAt = now
                 try write(record)
                 return
@@ -302,9 +420,10 @@ public final class AgentHookActivityStore: @unchecked Sendable {
         }
 
         try deactivateSession(
-            provider: provider,
+            provider: event.provider,
             sessionID: event.sessionID,
-            eventName: event.hookEventName,
+            eventName: event.eventName,
+            source: event.source,
             now: now
         )
     }
@@ -313,10 +432,10 @@ public final class AgentHookActivityStore: @unchecked Sendable {
         provider: AgentKind,
         sessionID: String,
         eventName: String,
+        source: AgentStatusSource,
         now: Date
     ) throws {
         var foundRecord = false
-
         for url in recordURLs() {
             guard var record = readRecord(at: url),
                   record.kind == provider,
@@ -324,7 +443,6 @@ public final class AgentHookActivityStore: @unchecked Sendable {
             else {
                 continue
             }
-
             foundRecord = true
             record.state = .inactive
             record.lastEventName = eventName
@@ -333,16 +451,18 @@ public final class AgentHookActivityStore: @unchecked Sendable {
         }
 
         if !foundRecord {
-            let record = LeaseRecord(
-                schemaVersion: 1,
-                kind: provider,
-                sessionID: sessionID,
-                activityID: sessionID,
-                state: .inactive,
-                lastEventName: eventName,
-                updatedAt: now
+            try write(
+                LeaseRecord(
+                    schemaVersion: 2,
+                    kind: provider,
+                    sessionID: sessionID,
+                    activityID: sessionID,
+                    state: .inactive,
+                    source: source,
+                    lastEventName: eventName,
+                    updatedAt: now
+                )
             )
-            try write(record)
         }
     }
 
@@ -362,7 +482,6 @@ public final class AgentHookActivityStore: @unchecked Sendable {
             else {
                 continue
             }
-
             record.state = .inactive
             record.lastEventName = eventName
             record.updatedAt = now
@@ -370,19 +489,85 @@ public final class AgentHookActivityStore: @unchecked Sendable {
         }
     }
 
+    private func recentRecords(
+        now: Date
+    ) -> [(url: URL, record: LeaseRecord)] {
+        var records: [(url: URL, record: LeaseRecord)] = []
+        let expirationWindow = max(
+            activeLeaseTimeout,
+            inactiveAuthorityWindow
+        )
+
+        for url in recordURLs() {
+            guard let record = readRecord(at: url) else {
+                continue
+            }
+            if record.updatedAt.timeIntervalSince(now) > 300 {
+                // A corrupted or clock-skewed lease must not keep the Mac
+                // awake indefinitely.
+                try? fileManager.removeItem(at: url)
+                continue
+            }
+            if now.timeIntervalSince(record.updatedAt) > expirationWindow {
+                try? fileManager.removeItem(at: url)
+                continue
+            }
+            records.append((url, record))
+        }
+
+        records.sort {
+            if $0.record.state != $1.record.state {
+                return $0.record.state == .active
+            }
+            return $0.record.updatedAt > $1.record.updatedAt
+        }
+        if records.count > maximumLeaseRecords {
+            for item in records.dropFirst(maximumLeaseRecords) {
+                try? fileManager.removeItem(at: item.url)
+            }
+            records = Array(records.prefix(maximumLeaseRecords))
+        }
+        return records
+    }
+
     private func recordURLs() -> [URL] {
-        (try? fileManager.contentsOfDirectory(
+        guard let enumerator = fileManager.enumerator(
             at: rootDirectory,
             includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]
-        ))?.filter { $0.pathExtension == "json" } ?? []
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+        ) else {
+            return []
+        }
+
+        let inspectionLimit = min(
+            max(maximumLeaseRecords * 4, 128),
+            1_024
+        )
+        var urls: [URL] = []
+        urls.reserveCapacity(min(inspectionLimit, maximumLeaseRecords))
+        while let url = enumerator.nextObject() as? URL {
+            guard url.pathExtension == "json" else {
+                continue
+            }
+            urls.append(url)
+            if urls.count >= inspectionLimit {
+                break
+            }
+        }
+        return urls
     }
 
     private func readRecord(at url: URL) -> LeaseRecord? {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+              let fileSize = values.fileSize,
+              fileSize <= 16_384
+        else {
+            try? fileManager.removeItem(at: url)
+            return nil
+        }
         guard let data = try? Data(contentsOf: url) else {
             return nil
         }
-
         return try? decoder.decode(LeaseRecord.self, from: data)
     }
 
@@ -407,7 +592,6 @@ public final class AgentHookActivityStore: @unchecked Sendable {
             provider.identifier,
             Self.stableHash(sessionID)
         ].joined(separator: "-")
-
         return rootDirectory
             .appendingPathComponent(name)
             .appendingPathExtension("json")
@@ -426,9 +610,9 @@ public final class AgentHookActivityStore: @unchecked Sendable {
         _ lhs: RunningAgent,
         _ rhs: RunningAgent
     ) -> Bool {
-        if lhs.kind.rawValue == rhs.kind.rawValue {
+        if lhs.kind.displayName == rhs.kind.displayName {
             return lhs.sessionID < rhs.sessionID
         }
-        return lhs.kind.rawValue < rhs.kind.rawValue
+        return lhs.kind.displayName < rhs.kind.displayName
     }
 }
