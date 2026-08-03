@@ -5,6 +5,8 @@ struct SettingsView: View {
     @ObservedObject var controller: IntegrationSettingsController
     @AppStorage(CompletionSoundPlayer.preferenceKey)
     private var completionSoundEnabled = true
+    @State private var bridgeProviderID = "my-agent"
+    @State private var bridgeDisplayName = "My Agent"
 
     var body: some View {
         ScrollView {
@@ -122,10 +124,10 @@ struct SettingsView: View {
     }
 
     private var bridgeSection: some View {
-        settingsCard(title: "自定义 Agent Bridge", systemImage: "link") {
+        settingsCard(title: "通用 Agent Bridge", systemImage: "link") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
-                    Text("通用精确跟踪")
+                    Text("把其他 Agent 的任务状态连接到 AgentAwake")
                         .font(.system(size: 13, weight: .medium))
 
                     Text(bridgeStatusText)
@@ -143,39 +145,287 @@ struct SettingsView: View {
                 }
 
                 Text(
-                    "供支持运行命令的第三方 Agent 发送 start、heartbeat 和 " +
-                    "stop。Bridge 每次写入事件后立即退出，不会增加常驻服务。"
+                    "适用于能在任务开始、运行中和结束时执行本地命令的 Agent。" +
+                    "AgentAwake 只接收状态、Agent 名称和任务 ID，" +
+                    "不读取提示词或回复内容。"
                 )
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                if controller.bridge.state != .available {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(controller.bridge.commandTemplate)
-                            .font(.system(size: 10, design: .monospaced))
-                            .textSelection(.enabled)
-                            .padding(9)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                Color.primary.opacity(0.045),
-                                in: RoundedRectangle(cornerRadius: 7)
-                            )
+                switch controller.bridge.state {
+                case .available:
+                    Text(
+                        "启用后会安装一个用完即退出的本地 helper；" +
+                        "不会替你修改第三方 Agent 的配置。"
+                    )
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
 
-                        Button("复制命令模板") {
-                            controller.copyBridgeCommand()
-                        }
-                        .controlSize(.small)
+                case .installed:
+                    bridgeConnectionGuide
 
-                        Text(
-                            "把 EVENT 替换为 start、heartbeat 或 stop；" +
-                            "SESSION_ID 在同一次任务中保持一致。"
+                case .needsRepair:
+                    Label(
+                        "请先修复 Bridge，再复制接入命令。",
+                        systemImage: "exclamationmark.triangle"
+                    )
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.orange)
+                }
+            }
+        }
+    }
+
+    private var bridgeConnectionGuide: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Divider()
+
+            HStack(alignment: .top, spacing: 10) {
+                stepBadge(1)
+
+                VStack(alignment: .leading, spacing: 9) {
+                    Text("填写这个 Agent 的标识")
+                        .font(.system(size: 12, weight: .medium))
+
+                    HStack(alignment: .top, spacing: 10) {
+                        bridgeIdentityField(
+                            title: "Agent ID",
+                            prompt: "my-agent",
+                            help: "用于区分 Agent；会转为小写，可用字母、数字、.-_。",
+                            text: $bridgeProviderID
+                        )
+
+                        bridgeIdentityField(
+                            title: "显示名称",
+                            prompt: "My Agent",
+                            help: "任务运行时会在 AgentAwake 中显示。",
+                            text: $bridgeDisplayName
+                        )
+                    }
+
+                    if let bridgeCommandErrorText {
+                        Label(
+                            bridgeCommandErrorText,
+                            systemImage: "exclamationmark.circle"
                         )
                             .font(.system(size: 10))
+                            .foregroundStyle(.orange)
+                    }
+                }
+            }
+
+            HStack(alignment: .top, spacing: 10) {
+                stepBadge(2)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("把命令分别放进对应的生命周期 Hook")
+                        .font(.system(size: 12, weight: .medium))
+
+                    Text(
+                        "不要在终端依次执行这三条命令。" +
+                        "请让你的 Agent 在对应时机自动调用。"
+                    )
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    ForEach(AgentBridgeLifecycleEvent.allCases) { event in
+                        bridgeCommandRow(event)
+                    }
+
+                    Label(
+                        "关键：把命令里的 $AGENT_SESSION_ID 换成 Agent 提供的" +
+                        "任务 ID 变量，例如 task_id、session_id 或 conversation_id。" +
+                        "如果 ID 来自 Hook 的 JSON 输入，请先在 Hook 脚本中读取它。" +
+                        "同一次任务的三种事件必须使用同一个值。",
+                        systemImage: "key"
+                    )
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    HStack {
+                        Button("复制全部示例") {
+                            if let bridgeAllCommandsText {
+                                controller.copyBridgeText(
+                                    bridgeAllCommandsText,
+                                    confirmation: "三条 Bridge 命令已复制。"
+                                )
+                            }
+                        }
+                        .controlSize(.small)
+                        .disabled(bridgeCommandSet == nil)
+
+                        Spacer()
+
+                        Text("开始与结束必需；长任务需要心跳。")
+                            .font(.system(size: 9.5))
                             .foregroundStyle(.secondary)
                     }
                 }
             }
+        }
+    }
+
+    private func stepBadge(_ number: Int) -> some View {
+        Text("\(number)")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(width: 20, height: 20)
+            .background(
+                Color.primary.opacity(0.07),
+                in: Circle()
+            )
+    }
+
+    private func bridgeIdentityField(
+        title: String,
+        prompt: String,
+        help: String,
+        text: Binding<String>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 10.5, weight: .medium))
+
+            TextField(prompt, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(.system(size: 11))
+
+            Text(help)
+                .font(.system(size: 9))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func bridgeCommandRow(
+        _ event: AgentBridgeLifecycleEvent
+    ) -> some View {
+        let command = bridgeCommandSet?.command(for: event)
+
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: bridgeEventSymbol(event))
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 17)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(bridgeEventTitle(event))
+                        .font(.system(size: 11, weight: .medium))
+                    Text(bridgeEventDescription(event))
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 8)
+
+                Text("--event \(event.rawValue)")
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+
+                Button("复制") {
+                    if let command {
+                        controller.copyBridgeText(
+                            command.text,
+                            confirmation: "\(bridgeEventTitle(event))命令已复制。"
+                        )
+                    }
+                }
+                .controlSize(.small)
+                .disabled(command == nil)
+            }
+
+            Text(command?.text ?? "填写有效的 Agent 信息后生成命令。")
+                .font(.system(size: 9, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .padding(7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    Color.primary.opacity(0.04),
+                    in: RoundedRectangle(cornerRadius: 6)
+                )
+                .help(command?.text ?? "")
+        }
+        .padding(8)
+        .background(
+            Color.primary.opacity(0.025),
+            in: RoundedRectangle(cornerRadius: 8)
+        )
+    }
+
+    private var bridgeCommandSet: AgentBridgeCommandSet? {
+        try? AgentBridgeCommandSet(
+            helperPath: controller.bridge.helperPath,
+            providerID: bridgeProviderID,
+            displayName: bridgeDisplayName
+        )
+    }
+
+    private var bridgeCommandErrorText: String? {
+        do {
+            _ = try AgentBridgeCommandSet(
+                helperPath: controller.bridge.helperPath,
+                providerID: bridgeProviderID,
+                displayName: bridgeDisplayName
+            )
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    private var bridgeAllCommandsText: String? {
+        guard let bridgeCommandSet else {
+            return nil
+        }
+
+        return bridgeCommandSet.commands.map { command in
+            "# \(bridgeEventTitle(command.event))\n\(command.text)"
+        }.joined(separator: "\n\n")
+    }
+
+    private func bridgeEventTitle(
+        _ event: AgentBridgeLifecycleEvent
+    ) -> String {
+        switch event {
+        case .start:
+            return "任务开始"
+        case .heartbeat:
+            return "运行中（长任务）"
+        case .stop:
+            return "任务结束"
+        }
+    }
+
+    private func bridgeEventDescription(
+        _ event: AgentBridgeLifecycleEvent
+    ) -> String {
+        switch event {
+        case .start:
+            return "任务开始时调用，建立活动状态。"
+        case .heartbeat:
+            return "长任务定期调用；短任务可以省略。"
+        case .stop:
+            return "完成、取消或失败时调用，释放活动状态。"
+        }
+    }
+
+    private func bridgeEventSymbol(
+        _ event: AgentBridgeLifecycleEvent
+    ) -> String {
+        switch event {
+        case .start:
+            return "play.fill"
+        case .heartbeat:
+            return "waveform.path.ecg"
+        case .stop:
+            return "stop.fill"
         }
     }
 

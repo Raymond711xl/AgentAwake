@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  macOS 13+ · Apple Silicon / Intel · 当前版本 0.5.0
+  macOS 13+ · Apple Silicon / Intel · 当前版本 0.5.1
 </p>
 
 <p align="center">
@@ -113,7 +113,7 @@ AgentAwake 不会读取提示词、响应正文、Token 明细或 API 密钥。
 - 登录时启动；
 - Codex Hooks；
 - Claude Hooks；
-- 自定义 Agent Bridge。
+- 通用 Agent Bridge。
 
 Agent 模式默认读取本机已有的 Codex 与 Claude 活动记录，因此 Hooks 不是使用
 前置条件。设置页会标明本机检测状态，只允许为实际存在的 Agent 安装 Hooks，
@@ -135,10 +135,16 @@ Claude 的用户级设置会自动加载。
 不安装 Hooks 也可以使用 Agent 模式，只是状态变化可能不如 Hooks 及时。
 安装、修复和移除均在设置页完成，不需要终端。
 
-如果第三方 Agent 支持在生命周期中执行命令，可以在设置中启用 Bridge，复制一行
-模板，并把 `EVENT` 分别替换成 `start`、`heartbeat` 或 `stop`。同一任务必须保持
-相同的 `SESSION_ID`。Bridge 不是网络抓包，也不会自动识别任意常驻进程；Agent
-本身必须能在正确的生命周期时机执行该命令。
+如果第三方 Agent 支持在生命周期中执行命令，可以在设置中启用“通用 Agent
+Bridge”。填写 Agent ID 和显示名称后，设置页会分别生成“任务开始”“运行中”和
+“任务结束”三条命令，不再要求手动替换 `EVENT`。不要在终端依次执行这三条命令，
+而应把它们分别放进 Agent 对应的生命周期 Hook；开始与结束必需，长任务需要定期
+发送心跳。
+
+把三条命令中的 `$AGENT_SESSION_ID` 换成 Agent 提供的稳定任务 ID 变量，例如
+`task_id`、`session_id` 或 `conversation_id`；如果 ID 来自 Hook 的 JSON 输入，
+请先在 Hook 脚本中读取它。同一次任务的三条命令必须使用同一个值。Bridge 不是
+网络抓包，也不会自动识别任意常驻进程；Agent 本身必须能在正确时机调用命令。
 
 ## 如何确认没有修改系统设置
 
@@ -229,7 +235,7 @@ docs/RELEASING.md            双架构 DMG 与 GitHub Release 流程
 ## 当前边界
 
 AgentAwake 的定时模式不依赖任何 Agent；Agent 感知模式当前支持本机运行的
-Codex 与 Claude 自动检测，以及能执行生命周期命令的自定义 Agent Bridge。
-Cursor、OpenCode、Kimi 等产品的零配置适配器仍会在下一阶段逐个验证，不能仅凭
-进程或加密流量宣称支持。AgentAwake 不是系统电源设置管理器，也不会替代 macOS
-原有睡眠策略；它只在所选窗口内临时延后空闲休眠。
+Codex 与 Claude 自动检测，以及能正确发送生命周期事件的通用 Agent Bridge。
+没有可靠生命周期 Hooks 的 Agent 暂不适配，不能仅凭进程或加密流量宣称支持。
+AgentAwake 不是系统电源设置管理器，也不会替代 macOS 原有睡眠策略；它只在所选
+窗口内临时延后空闲休眠。

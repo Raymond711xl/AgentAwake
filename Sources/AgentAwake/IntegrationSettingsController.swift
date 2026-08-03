@@ -50,7 +50,7 @@ final class IntegrationSettingsController: ObservableObject {
         feedbackText = nil
         do {
             try manager.installBridge()
-            feedbackText = "自定义 Agent Bridge 已启用。"
+            feedbackText = "通用 Agent Bridge 已启用。"
         } catch {
             feedbackText = error.localizedDescription
         }
@@ -66,18 +66,18 @@ final class IntegrationSettingsController: ObservableObject {
         isChangingBridge = true
         feedbackText = nil
         manager.uninstallBridge()
-        feedbackText = "自定义 Agent Bridge 已移除。"
+        feedbackText = "通用 Agent Bridge 已移除。"
         isChangingBridge = false
         refresh()
     }
 
-    func copyBridgeCommand() {
+    func copyBridgeText(_ text: String, confirmation: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(
-            bridge.commandTemplate,
+            text,
             forType: .string
         )
-        feedbackText = "Bridge 命令模板已复制。"
+        feedbackText = confirmation
     }
 
     func install(_ provider: AgentIntegrationProvider) {

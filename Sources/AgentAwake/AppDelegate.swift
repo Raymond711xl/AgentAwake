@@ -1,5 +1,6 @@
 import AppKit
 import AgentAwakeCore
+import AgentAwakeSetupCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appController: AppController?
@@ -10,8 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
 
+        let qaHomePath = Self.argumentValue(after: "--qa-detector-home")
         let detector: SystemAgentDetector
-        if let qaHomePath = Self.argumentValue(after: "--qa-detector-home") {
+        if let qaHomePath {
             detector = SystemAgentDetector(
                 homeDirectory: URL(
                     fileURLWithPath: qaHomePath,
@@ -22,7 +24,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             detector = SystemAgentDetector()
         }
         let appController = AppController(detector: detector)
-        let integrationSettingsController = IntegrationSettingsController()
+        let integrationSettingsController: IntegrationSettingsController
+        if let qaHomePath {
+            let helperURL = Bundle.main.bundleURL
+                .appendingPathComponent("Contents", isDirectory: true)
+                .appendingPathComponent("Helpers", isDirectory: true)
+                .appendingPathComponent("AgentAwakeHook")
+            let manager = AgentIntegrationManager(
+                homeDirectory: URL(
+                    fileURLWithPath: qaHomePath,
+                    isDirectory: true
+                ),
+                bundledHelperURL: helperURL
+            )
+            integrationSettingsController = IntegrationSettingsController(
+                manager: manager
+            )
+        } else {
+            integrationSettingsController = IntegrationSettingsController()
+        }
         let settingsWindowController = SettingsWindowController(
             settingsController: integrationSettingsController
         )

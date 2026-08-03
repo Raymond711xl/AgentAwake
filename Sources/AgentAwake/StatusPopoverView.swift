@@ -96,7 +96,7 @@ struct StatusPopoverView: View {
                 ProgressView()
                     .controlSize(.small)
 
-                Text("等待 Codex 或 Claude 任务")
+                Text("等待 Agent 任务")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
 

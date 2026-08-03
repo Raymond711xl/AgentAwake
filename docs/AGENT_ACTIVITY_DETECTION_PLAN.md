@@ -1,8 +1,8 @@
 # AgentAwake Agent 活动检测路线图
 
-状态：阶段 A、B、C 已实现并通过短时工程验收；阶段 D 待逐个适配。
+状态：阶段 A、B、C 已实现并通过短时工程验收；阶段 D 待增加已验证的 Bridge 预设。
 
-确认日期：2026-08-01。实现更新：2026-08-02。
+确认日期：2026-08-01。实现更新：2026-08-03。
 
 ## 1. 目标
 
@@ -184,7 +184,10 @@ AgentActivityAdapter
 - 顶部说明“自动检测无需配置；精确跟踪需要按 Agent 启用”；
 - 可用时显示“启用精确跟踪”；
 - 安装前展示修改预览，安装后提供“修复”和“移除”；
-- 自定义 Agent 提供可复制的 Bridge 命令和最小事件示例；
+- 通用 Agent Bridge 让用户填写 Agent ID 与显示名称，并分别复制任务开始、
+  长任务心跳和任务结束命令；
+- 界面明确说明命令应放入对应生命周期 Hook，并解释如何把
+  `$AGENT_SESSION_ID` 映射为稳定任务 ID；
 - 精确事件失效时显示“已回退到自动检测”，而不是静默降低准确度。
 
 不增加首次启动向导，不把可选配置变成双击后的必经步骤。各 Agent 的“最后活动
@@ -230,23 +233,20 @@ AgentActivityAdapter
 - 设置页支持预览、安装、修复、移除和自动回退；
 - 不保存 prompt、response、Token 或凭证。
 
-### 阶段 D：逐个增加第三方适配器（下一阶段）
+### 阶段 D：逐个增加 Bridge 接入预设（后续）
 
-每次只完成一个 Agent，并独立验证后再进入下一个。建议研究顺序：
+只研究公开提供可靠生命周期 Hook、插件事件或命令回调的 Agent。每个预设负责把
+第三方的开始、持续、完成、取消和失败事件映射到 Bridge，并把第三方提供的稳定任务
+ID 映射到 `$AGENT_SESSION_ID`。没有可靠生命周期入口的 Agent 暂不适配，也不通过
+进程名、全量日志扫描或加密流量进行推测。
 
-1. OpenCode：优先验证本地 SQLite 是否能低成本提供生命周期状态；
-2. Cursor：区分常驻编辑器进程与真正的 Agent 活动；
-3. Cline/Kilo Code 等 VS Code 扩展：限制监听范围，不能扫描整个编辑器目录；
-4. Kimi、Qwen 等 CLI Agent：优先本地会话，必要时使用 Bridge；
-5. 其他国产或开源 Agent：按实际用户需求和可验证数据源排期。
+单个预设的完成标准：
 
-单个适配器的完成标准：
-
-- 自动或精确来源边界写清楚；
-- 不读取不必要的正文；
-- 开始、持续、正常结束、异常结束四类场景通过；
-- 空闲 30 分钟和活跃 30 分钟资源测试通过；
-- 上游数据格式变化时安全失效，不错误地永久保持唤醒；
+- 官方生命周期契约、配置位置和适用版本已实际验证；
+- 开始与结束事件必需，长任务心跳和异常结束路径写清楚；
+- 同一次任务始终使用稳定且一致的会话 ID；
+- 若由 AgentAwake 修改配置，必须先预览、备份并支持幂等移除；
+- 上游契约变化时安全失效，不错误地永久保持唤醒；
 - README 和设置页只宣称已实际验证的平台与版本。
 
 ### 阶段 E：API 开发者接入
@@ -267,9 +267,11 @@ Token 或任务是否结束。只有前述阶段完成后，才决定是否建�
 - 用户只看到“自动检测”和“精确跟踪”两个层级；
 - 自动检测是默认、零配置路径；
 - 精确跟踪按 Agent 选择，是自动检测的增强而不是替代；
-- 先优化检测引擎，再扩大支持列表；
+- 通用 Bridge 是其他 Agent 的精确接入底座，优先优化接入说明和复制体验；
+- 后续只为具有可靠生命周期入口的 Agent 增加已验证 Bridge 预设；
+- 没有可靠生命周期 Hooks 的 Agent 暂不适配；
 - 先支持活动生命周期，不建设 Token Monitor 式统计面板；
-- 每增加一个 Agent，都必须先通过资源、隐私和异常释放验收。
+- 每增加一个具名预设，都必须先通过资源、隐私和异常释放验收。
 
 ## 10. 2026-08-02 实现与验收记录
 
@@ -283,7 +285,7 @@ Token 或任务是否结束。只有前述阶段完成后，才决定是否建�
   日志，目录变化或事件丢失才完整校准；
 - 会话缓存上限 128，所有未完成行缓冲合计上限 1 MiB，单行上限 64 KiB，
   单次 FSEvents 批次最多保留 256 个 URL，单个租约文件最多读取 16 KiB；
-- Codex/Claude Hooks 与自定义 Bridge 共用 `start`、`heartbeat`、`stop` 模型；
+- Codex/Claude Hooks 与 Bridge 共用 `start`、`heartbeat`、`stop` 模型；
   helper 单次写入后退出，没有新增常驻服务；
 - 设置页展示 Hooks 的配置路径和新增命令预览，保留首次备份、幂等安装、修复、
   移除与自动日志回退；自定义 Agent 可复制 Bridge 命令模板；
@@ -310,6 +312,18 @@ Token 或任务是否结束。只有前述阶段完成后，才决定是否建�
 ./scripts/measure-resources.sh --pid PID --duration 600 --interval 5
 ```
 
+## 11. 2026-08-03 通用 Bridge 接入体验更新
+
+- 设置页将“自定义 Agent Bridge”明确为“通用 Agent Bridge”，并先说明只适用于能在
+  生命周期中执行本地命令的 Agent；
+- 用户填写 Agent ID 与显示名称后，界面直接生成 `start`、`heartbeat`、`stop`
+  三条命令，不再复制含 `EVENT` 占位符的模板；
+- 界面明确说明三条命令应分别放进 Agent 的生命周期 Hook，而不是在终端依次执行；
+- 所有命令统一使用 `$AGENT_SESSION_ID`，并解释如何映射 `task_id`、`session_id`
+  或 `conversation_id`；无效 Agent ID 会禁用复制并就地提示；
+- 隔离 QA home 中已验证命令生成、输入校验、原生设置窗口布局，以及同一会话的
+  `BridgeStart → BridgeHeartbeat → BridgeStop` 状态转换。
+
 ## English summary
 
 AgentAwake now exposes two progressive levels: zero-configuration automatic
@@ -318,5 +332,6 @@ through lifecycle hooks or a one-shot local bridge. The precise level is enabled
 per agent and keeps automatic detection as a fallback.
 
 The implemented core remains native and event-driven, adds no resident helper,
-and avoids packet interception. The next work is one independently verified
-third-party adapter at a time, while preserving the resource budgets above.
+and avoids packet interception. Future named integrations will be independently
+verified Bridge presets for agents with reliable lifecycle entry points; agents
+without such hooks are deferred.

@@ -1132,10 +1132,77 @@ private func testBridgeSetupLifecycle() {
 
     let installed = manager.inspectBridge()
     expect(installed.state == .installed, "Bridge 安装后应可用")
-    expect(
-        installed.commandTemplate.contains("--event EVENT"),
-        "Bridge 应提供统一的一行事件模板"
-    )
+    do {
+        let commands = try manager.bridgeCommands(
+            providerID: " Example-Agent ",
+            displayName: "Raymond's Agent"
+        )
+        expect(
+            commands.providerID == "example-agent",
+            "Bridge 命令应规范化 Agent ID"
+        )
+        expect(
+            commands.commands.map(\.event)
+                == AgentBridgeLifecycleEvent.allCases,
+            "Bridge 应按开始、心跳、结束生成三条命令"
+        )
+        expect(
+            commands.commands.allSatisfy {
+                $0.text.contains(#"--session "$AGENT_SESSION_ID""#)
+            },
+            "三条 Bridge 命令应使用同一个显式会话变量"
+        )
+        expect(
+            commands.command(for: .start)?.text.contains("--event start")
+                == true,
+            "开始命令应直接写入 start 事件"
+        )
+        expect(
+            commands.command(for: .heartbeat)?.text.contains(
+                "--event heartbeat"
+            ) == true,
+            "心跳命令应直接写入 heartbeat 事件"
+        )
+        expect(
+            commands.command(for: .stop)?.text.contains("--event stop")
+                == true,
+            "结束命令应直接写入 stop 事件"
+        )
+        expect(
+            !commands.allCommandsText.contains("--event EVENT"),
+            "复制内容不应再要求用户替换 EVENT"
+        )
+        expect(
+            commands.allCommandsText.contains("'Raymond'\\''s Agent'"),
+            "Bridge 命令应安全转义显示名称"
+        )
+    } catch {
+        failures.append("Bridge 三事件命令生成失败：\(error.localizedDescription)")
+    }
+
+    do {
+        _ = try manager.bridgeCommands(
+            providerID: "bad id",
+            displayName: "Bad Agent"
+        )
+        failures.append("Bridge 不应接受包含空格的 Agent ID")
+    } catch let error as AgentBridgeCommandError {
+        expect(error == .invalidProviderID, "Bridge 应说明 Agent ID 无效")
+    } catch {
+        failures.append("Bridge Agent ID 返回了错误的异常类型")
+    }
+
+    do {
+        _ = try manager.bridgeCommands(
+            providerID: "valid-agent",
+            displayName: "   "
+        )
+        failures.append("Bridge 不应接受空白显示名称")
+    } catch let error as AgentBridgeCommandError {
+        expect(error == .invalidDisplayName, "Bridge 应说明显示名称无效")
+    } catch {
+        failures.append("Bridge 显示名称返回了错误的异常类型")
+    }
     expect(
         fileManager.isExecutableFile(atPath: installed.helperPath),
         "Bridge helper 应保持可执行"

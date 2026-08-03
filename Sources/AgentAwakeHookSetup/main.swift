@@ -56,6 +56,23 @@ private func stateDescription(_ state: AgentIntegrationState) -> String {
     }
 }
 
+private func printBridgeCommands(_ commands: AgentBridgeCommandSet) {
+    for command in commands.commands {
+        let label: String
+        switch command.event {
+        case .start:
+            label = "任务开始"
+        case .heartbeat:
+            label = "运行中（长任务）"
+        case .stop:
+            label = "任务结束"
+        }
+        print("\(label)：")
+        print(command.text)
+    }
+    print("请把 $AGENT_SESSION_ID 换成同一次任务的稳定 ID 变量。")
+}
+
 do {
     guard CommandLine.arguments.count >= 2,
           let action = SetupAction(rawValue: CommandLine.arguments[1])
@@ -127,23 +144,23 @@ do {
 
     case .bridgeInstall:
         try manager.installBridge()
-        print("自定义 Agent Bridge 已启用。")
-        print(manager.inspectBridge().commandTemplate)
+        print("通用 Agent Bridge 已启用。")
+        printBridgeCommands(try manager.bridgeCommands())
 
     case .bridgeUninstall:
         manager.uninstallBridge()
-        print("自定义 Agent Bridge 已移除。")
+        print("通用 Agent Bridge 已移除。")
 
     case .bridgeStatus:
         let snapshot = manager.inspectBridge()
         switch snapshot.state {
         case .available:
-            print("自定义 Agent Bridge：可选，尚未启用")
+            print("通用 Agent Bridge：可选，尚未启用")
         case .installed:
-            print("自定义 Agent Bridge：已启用")
-            print(snapshot.commandTemplate)
+            print("通用 Agent Bridge：已启用")
+            printBridgeCommands(try manager.bridgeCommands())
         case .needsRepair:
-            print("自定义 Agent Bridge：需要修复或更新")
+            print("通用 Agent Bridge：需要修复或更新")
         }
     }
 } catch {

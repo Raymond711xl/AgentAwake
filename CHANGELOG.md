@@ -15,11 +15,23 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Planned / 计划
 
-- 下一阶段将按 OpenCode、Cursor、Cline/Kilo Code、Kimi/Qwen 的顺序，逐个研究并
-  验证第三方零配置适配器；在完成资源、隐私与生命周期验收前不宣称自动支持。
-  The next phase will research and verify zero-setup adapters one by one,
-  starting with OpenCode, Cursor, Cline/Kilo Code, and Kimi/Qwen. Automatic
-  support will not be claimed before resource, privacy, and lifecycle checks.
+- 后续只为公开提供可靠生命周期 Hook、插件事件或命令回调的 Agent 增加已验证
+  Bridge 预设；没有可靠生命周期入口的 Agent 暂不适配。
+  Future named Bridge presets will be limited to agents with reliable public
+  lifecycle hooks, plugin events, or command callbacks. Agents without a
+  reliable lifecycle entry point are deferred.
+
+## [0.5.1] - 2026-08-03
+
+### Changed / 变更
+
+- 将“自定义 Agent Bridge”明确为“通用 Agent Bridge”：用户填写 Agent ID 与显示
+  名称后，可分别复制任务开始、长任务心跳和任务结束命令，不再手动替换 `EVENT`；
+  设置页同时解释 `$AGENT_SESSION_ID` 的映射方式和正确的 Hook 放置位置。
+  Clarified Custom Agent Bridge as Universal Agent Bridge. Settings now
+  generates separate start, long-task heartbeat, and stop commands from an
+  Agent ID and display name, removes manual `EVENT` replacement, and explains
+  both lifecycle-hook placement and `$AGENT_SESSION_ID` mapping.
 
 ## [0.5.0] - 2026-08-02
 

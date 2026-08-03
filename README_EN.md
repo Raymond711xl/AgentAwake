@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  macOS 13+ · Apple Silicon / Intel · Current version 0.5.0
+  macOS 13+ · Apple Silicon / Intel · Current version 0.5.1
 </p>
 
 <p align="center">
@@ -127,7 +127,7 @@ Click Settings at the bottom of the menu bar panel to manage:
 - launch at login;
 - Codex Hooks;
 - Claude Hooks;
-- the custom Agent Bridge.
+- the universal Agent Bridge.
 
 Agent mode reads existing local Codex and Claude activity records by default,
 so Hooks are not a prerequisite. Settings reports local detection state and
@@ -154,11 +154,18 @@ Agent mode still works without Hooks, although state transitions may be less
 immediate. Installation, repair, and removal all happen in Settings without a
 terminal.
 
-If a third-party agent can execute lifecycle commands, enable Bridge in
-Settings and copy the one-line template. Replace `EVENT` with `start`,
-`heartbeat`, or `stop`, and keep the same `SESSION_ID` for one task. Bridge is
-not packet interception and does not infer activity from a resident process;
-the agent must invoke it at the correct lifecycle points.
+If a third-party agent can execute lifecycle commands, enable Universal Agent
+Bridge in Settings. Enter an Agent ID and display name, then copy the separate
+Task Start, Running, and Task End commands. Do not run all three commands in a
+terminal; place each one in the matching lifecycle hook. Start and stop are
+required, while long-running tasks need periodic heartbeats.
+
+Replace `$AGENT_SESSION_ID` in all three commands with the agent's stable task
+ID variable, such as `task_id`, `session_id`, or `conversation_id`. If the ID
+arrives in a hook's JSON input, read it in the hook script first. Keep the same
+value for all events in one task. Bridge is not packet interception and does
+not infer activity from a resident process; the agent must invoke it at the
+correct lifecycle points.
 
 ## Verify that system settings remain unchanged
 
@@ -255,10 +262,9 @@ docs/RELEASING.md            Dual-architecture DMG and GitHub Release workflow
 ## Current scope
 
 AgentAwake timed modes do not require an agent. Agent-aware mode currently
-supports automatic local detection for Codex and Claude, plus precise Bridge
-events from custom agents that can execute lifecycle commands. Zero-setup
-adapters for Cursor, OpenCode, Kimi, and others still require individual
-verification; a process name or encrypted traffic alone is not treated as
-support. AgentAwake is not a system power-settings manager and does not replace
-macOS sleep policy; it only postpones idle sleep during the selected protection
-window.
+supports automatic local detection for Codex and Claude, plus precise events
+from hook-capable agents connected through Universal Agent Bridge. Agents
+without reliable lifecycle hooks are out of scope for now; a process name or
+encrypted traffic alone is not treated as support. AgentAwake is not a system
+power-settings manager and does not replace macOS sleep policy; it only
+postpones idle sleep during the selected protection window.
