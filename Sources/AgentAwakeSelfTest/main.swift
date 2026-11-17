@@ -252,6 +252,13 @@ private func testProtectionSession() {
         "新 Agent 出现时应再次开始保护"
     )
 
+    var chatSession = ProtectionSession(mode: .agent)
+    _ = chatSession.setEnabled(true, agentCount: 2, now: now)
+    let workContinues = chatSession.updateAgentCount(1, now: now, confirmedFinish: true)
+    expect(workContinues.isEmpty && chatSession.isProtecting, "Chat 结束时应继续保护其他任务")
+    let chatFinished = chatSession.updateAgentCount(0, now: now, confirmedFinish: true)
+    expect(chatFinished == finishEffects, "最后一个 Chat 回复确认结束时应直接释放")
+
     var returnedSession = ProtectionSession(
         mode: .agent,
         agentEndGrace: 5
@@ -307,6 +314,29 @@ private func testProtectionSession() {
     expect(
         exclusiveSession.mode == .oneHour,
         "运行中不应切换到另一种防休眠模式"
+    )
+}
+
+private func testChatGPTChatControls() {
+    let composerClasses = ["size-token-button-composer", "bg-composer-primary"]
+    expect(
+        ChatGPTChatControls.isChatEditor(labels: ["询问 ChatGPT"])
+            && ChatGPTChatControls.isChatEditor(labels: ["Ask ChatGPT"]),
+        "应识别中英文普通 Chat 输入框"
+    )
+    expect(
+        !ChatGPTChatControls.isChatEditor(labels: ["使用 ChatGPT Work", "Work with Codex"]),
+        "Work 和 Codex 的输入框不应标为普通 Chat"
+    )
+    expect(
+        ChatGPTChatControls.isStopButton(labels: ["停止"], classes: composerClasses),
+        "Chat 输入框的停止按钮应表示正在生成"
+    )
+    expect(
+        !ChatGPTChatControls.isStopButton(labels: ["发送"], classes: composerClasses)
+            && !ChatGPTChatControls.isStopButton(labels: ["停止录音"], classes: composerClasses)
+            && !ChatGPTChatControls.isStopButton(labels: ["停止"], classes: []),
+        "发送、录音或其他位置的停止按钮不应表示 Chat 正在生成"
     )
 }
 
@@ -642,6 +672,120 @@ private func testHookOverridesTranscriptFallback() {
     expect(
         detector.runningAgents().isEmpty,
         "同一会话收到 Hook Stop 后应覆盖滞后的日志状态"
+    )
+}
+
+private func testChatGPTWorkAndCodexLifecycle() throws {
+    let fileManager = FileManager.default
+    let home = fileManager.temporaryDirectory.appendingPathComponent(
+        "AgentAwakeDesktopTest-\(UUID().uuidString)", isDirectory: true
+    )
+    defer { try? fileManager.removeItem(at: home) }
+    let logDirectory = home.appendingPathComponent(".codex/sessions", isDirectory: true)
+    try fileManager.createDirectory(at: logDirectory, withIntermediateDirectories: true)
+    let workID = "12345678-1234-1234-1234-123456789abc"
+    let work = logDirectory.appendingPathComponent("rollout-\(workID).jsonl")
+    let codex = logDirectory.appendingPathComponent("codex-session.jsonl")
+    let workHeader = #"{"timestamp":"2026-11-17T10:00:00Z","type":"session_meta","payload":{"originator":"codex_work_desktop","source":"vscode"}}"#
+    let codexHeader = #"{"type":"session_meta","payload":{"originator":"Codex Desktop"}}"#
+    let started = #"{"type":"event_msg","payload":{"type":"task_started","turn_id":"first"}}"#
+    let aborted = #"{"type":"event_msg","payload":{"type":"turn_aborted","turn_id":"first","reason":"interrupted"}}"#
+    let complete = #"{"type":"event_msg","payload":{"type":"task_complete","turn_id":"first"}}"#
+    let split = started.index(started.startIndex, offsetBy: 35)
+    try Data("\(workHeader)\n\(started[..<split])".utf8).write(to: work)
+    try Data("\(codexHeader)\n".utf8).write(to: codex)
+
+    let hookRoot = home.appendingPathComponent("hooks", isDirectory: true)
+    let detector = SystemAgentDetector(homeDirectory: home, hookActivityDirectory: hookRoot)
+    func append(_ text: String, to log: URL) throws {
+        let handle = try FileHandle(forWritingTo: log)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        try handle.write(contentsOf: Data(text.utf8))
+        detector.recordFileEvents(.init(urls: [log], requiresFullReconciliation: false))
+    }
+
+    expect(detector.runningAgents().isEmpty, "桌面应用空闲或日志还未写完时不应触发防休眠")
+    try append("\(started[split...])\n", to: work)
+    try append("\(started)\n", to: codex)
+    expect(
+        detector.runningAgents().map(\.displayName) == ["ChatGPT Work", "Codex"],
+        "同时运行的 Work 与 Codex 应分别标记，且启动时被截断的事件应继续解析"
+    )
+
+    let hookStore = AgentHookActivityStore(rootDirectory: hookRoot)
+    try hookStore.handle(
+        provider: .codex,
+        input: hookEventData(sessionID: workID, eventName: "UserPromptSubmit", turnID: "first")
+    )
+    let withHook = detector.runningAgents()
+    expect(
+        withHook.count == 2 && withHook.first?.displayName == "ChatGPT Work"
+            && withHook.first?.source == .preciseHook,
+        "Work 本地日志和 Codex Hook 应合并为一个 Work 任务"
+    )
+    try hookStore.handle(
+        provider: .codex,
+        input: hookEventData(sessionID: workID, eventName: "Stop", turnID: "first")
+    )
+    try append("\(aborted)\n", to: codex)
+    expect(detector.runningAgents().isEmpty, "取消 Codex 和结束 Work 后不应再报告活动任务")
+
+    // A fresh launch must also read the cancellation and completion markers.
+    try append("\(complete)\n", to: work)
+    let coldStart = SystemAgentDetector(
+        homeDirectory: home,
+        hookActivityDirectory: home.appendingPathComponent("unused-hooks")
+    )
+    expect(coldStart.runningAgents().isEmpty, "重新启动后不应恢复已取消或已结束的任务")
+
+    try append("\(started)\n", to: codex)
+    try fileManager.setAttributes([.modificationDate: Date().addingTimeInterval(-3_600)],
+                                  ofItemAtPath: codex.path)
+    expect(detector.runningAgents().isEmpty, "长时间没有信号的任务应释放防休眠")
+    try append(#"{"type":"event_msg","payload":{"type":"agent_reasoning"}}"# + "\n", to: codex)
+    expect(detector.runningAgents().map(\.displayName) == ["Codex"], "恢复工作的同一轮任务应重新被识别")
+    try fileManager.removeItem(at: codex)
+    expect(detector.runningAgents(forceReconciliation: true).isEmpty, "校准应移除已归档的活动记录")
+
+    // Simulate an existing Work log being appended and a new rollout starting
+    // without either change being delivered by FSEvents.
+    let resumed = try FileHandle(forWritingTo: work)
+    defer { try? resumed.close() }
+    try resumed.seekToEnd()
+    try resumed.write(contentsOf: Data("\(started)\n".utf8))
+
+    let date = Calendar(identifier: .gregorian).dateComponents(
+        [.year, .month, .day], from: Date()
+    )
+    let datedFolder = home.appendingPathComponent(".codex/sessions")
+        .appendingPathComponent(
+            String(format: "%04d/%02d/%02d", date.year!, date.month!, date.day!)
+        )
+    try fileManager.createDirectory(at: datedFolder, withIntermediateDirectories: true)
+    let newLog = datedFolder.appendingPathComponent("new-codex-rollout.jsonl")
+    try Data("\(codexHeader)\n\(started)\n".utf8).write(to: newLog)
+
+    let originalFullScans = coldStart.metrics().fullReconciliationCount
+    let recovered = coldStart.runningAgents(
+        forceReconciliation: false, checkForMissedEvents: true
+    )
+    expect(
+        recovered.map(\.displayName) == ["ChatGPT Work", "Codex"],
+        "漏掉文件通知时应识别继续运行的 Work 和新启动的 Codex"
+    )
+    expect(
+        coldStart.metrics().fullReconciliationCount == originalFullScans,
+        "补查新任务和已缓存的会话不应递归扫描历史目录"
+    )
+
+    try resumed.write(contentsOf: Data("\(complete)\n".utf8))
+    try fileManager.removeItem(at: newLog)
+    expect(
+        coldStart.runningAgents(
+            forceReconciliation: false, checkForMissedEvents: true
+        ).isEmpty,
+        "漏掉文件通知时补查仍应识别完成和移除"
     )
 }
 
@@ -1132,10 +1276,77 @@ private func testBridgeSetupLifecycle() {
 
     let installed = manager.inspectBridge()
     expect(installed.state == .installed, "Bridge 安装后应可用")
-    expect(
-        installed.commandTemplate.contains("--event EVENT"),
-        "Bridge 应提供统一的一行事件模板"
-    )
+    do {
+        let commands = try manager.bridgeCommands(
+            providerID: " Example-Agent ",
+            displayName: "Raymond's Agent"
+        )
+        expect(
+            commands.providerID == "example-agent",
+            "Bridge 命令应规范化 Agent ID"
+        )
+        expect(
+            commands.commands.map(\.event)
+                == AgentBridgeLifecycleEvent.allCases,
+            "Bridge 应按开始、心跳、结束生成三条命令"
+        )
+        expect(
+            commands.commands.allSatisfy {
+                $0.text.contains(#"--session "$AGENT_SESSION_ID""#)
+            },
+            "三条 Bridge 命令应使用同一个显式会话变量"
+        )
+        expect(
+            commands.command(for: .start)?.text.contains("--event start")
+                == true,
+            "开始命令应直接写入 start 事件"
+        )
+        expect(
+            commands.command(for: .heartbeat)?.text.contains(
+                "--event heartbeat"
+            ) == true,
+            "心跳命令应直接写入 heartbeat 事件"
+        )
+        expect(
+            commands.command(for: .stop)?.text.contains("--event stop")
+                == true,
+            "结束命令应直接写入 stop 事件"
+        )
+        expect(
+            !commands.allCommandsText.contains("--event EVENT"),
+            "复制内容不应再要求用户替换 EVENT"
+        )
+        expect(
+            commands.allCommandsText.contains("'Raymond'\\''s Agent'"),
+            "Bridge 命令应安全转义显示名称"
+        )
+    } catch {
+        failures.append("Bridge 三事件命令生成失败：\(error.localizedDescription)")
+    }
+
+    do {
+        _ = try manager.bridgeCommands(
+            providerID: "bad id",
+            displayName: "Bad Agent"
+        )
+        failures.append("Bridge 不应接受包含空格的 Agent ID")
+    } catch let error as AgentBridgeCommandError {
+        expect(error == .invalidProviderID, "Bridge 应说明 Agent ID 无效")
+    } catch {
+        failures.append("Bridge Agent ID 返回了错误的异常类型")
+    }
+
+    do {
+        _ = try manager.bridgeCommands(
+            providerID: "valid-agent",
+            displayName: "   "
+        )
+        failures.append("Bridge 不应接受空白显示名称")
+    } catch let error as AgentBridgeCommandError {
+        expect(error == .invalidDisplayName, "Bridge 应说明显示名称无效")
+    } catch {
+        failures.append("Bridge 显示名称返回了错误的异常类型")
+    }
     expect(
         fileManager.isExecutableFile(atPath: installed.helperPath),
         "Bridge helper 应保持可执行"
@@ -1199,12 +1410,18 @@ private func testBridgeSetupLifecycle() {
 }
 
 testProtectionSession()
+testChatGPTChatControls()
 testExtensibleAgentIdentityAndEvents()
 testCustomAdapterExtensionPoint()
 testAgentActivityParsing()
 testHookActivityStore()
 testLegacyLeaseAndCustomBridge()
 testHookOverridesTranscriptFallback()
+do {
+    try testChatGPTWorkAndCodexLifecycle()
+} catch {
+    failures.append("ChatGPT Work / Codex 生命周期测试失败：\(error.localizedDescription)")
+}
 testEventDrivenDetectorAndResourceBounds()
 testSelectiveIntegrationSetup()
 testBridgeSetupLifecycle()
@@ -1219,9 +1436,7 @@ if failures.isEmpty {
     let incrementalScanDuration = Date().timeIntervalSince(
         incrementalScanStartedAt
     )
-    let summary = detected.map {
-        "\($0.kind.rawValue)(\($0.sessionID.suffix(8)))"
-    }.joined(separator: ", ")
+    let summary = detected.map(\.displayName).sorted().joined(separator: ", ")
 
     expect(
         incrementalResult == detected,

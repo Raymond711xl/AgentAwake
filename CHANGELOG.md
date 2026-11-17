@@ -15,11 +15,46 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Planned / 计划
 
-- 下一阶段将按 OpenCode、Cursor、Cline/Kilo Code、Kimi/Qwen 的顺序，逐个研究并
-  验证第三方零配置适配器；在完成资源、隐私与生命周期验收前不宣称自动支持。
-  The next phase will research and verify zero-setup adapters one by one,
-  starting with OpenCode, Cursor, Cline/Kilo Code, and Kimi/Qwen. Automatic
-  support will not be claimed before resource, privacy, and lifecycle checks.
+- 后续只为公开提供可靠生命周期 Hook、插件事件或命令回调的 Agent 增加已验证
+  Bridge 预设；没有可靠生命周期入口的 Agent 暂不适配。
+  Future named Bridge presets will be limited to agents with reliable public
+  lifecycle hooks, plugin events, or command callbacks. Agents without a
+  reliable lifecycle entry point are deferred.
+
+## [0.5.4] - 2026-11-17
+
+### Added / 新增
+
+- Agent 模式识别有本地活动记录的 ChatGPT Work 任务，并在菜单栏与 Codex 分开显示。
+  Agent mode now labels ChatGPT Work and Codex tasks separately when they have
+  local activity records.
+- 普通 Chat 回复检测可在设置中试用，默认关闭。开启并授予 macOS 辅助功能权限后，
+  AgentAwake 通过桌面版 Chat 输入框的停止按钮识别生成状态。确认回复结束且没有其他
+  活跃任务时，释放防休眠。
+  Added an opt-in preview for ordinary Chat replies. With macOS Accessibility
+  permission, AgentAwake detects generation from the desktop composer's Stop
+  button and releases protection once the reply finishes and no other tasks remain.
+
+### Fixed / 修复
+
+- macOS 漏掉文件通知时，Agent 模式会定期补查本地日志，识别开始和结束事件。
+  Agent mode checks local logs for starts and finishes when macOS misses file
+  notifications.
+- 正确识别 Codex 取消事件。日志暂未写完或静默超时的任务继续写入后，可以恢复识别。
+  Codex cancellations are detected, and monitoring recovers from partially
+  written records and tasks that resume after the inactivity timeout.
+
+## [0.5.1] - 2026-08-03
+
+### Changed / 变更
+
+- 将“自定义 Agent Bridge”明确为“通用 Agent Bridge”：用户填写 Agent ID 与显示
+  名称后，可分别复制任务开始、长任务心跳和任务结束命令，不再手动替换 `EVENT`；
+  设置页同时解释 `$AGENT_SESSION_ID` 的映射方式和正确的 Hook 放置位置。
+  Clarified Custom Agent Bridge as Universal Agent Bridge. Settings now
+  generates separate start, long-task heartbeat, and stop commands from an
+  Agent ID and display name, removes manual `EVENT` replacement, and explains
+  both lifecycle-hook placement and `$AGENT_SESSION_ID` mapping.
 
 ## [0.5.0] - 2026-08-02
 

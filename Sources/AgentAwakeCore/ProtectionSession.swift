@@ -81,7 +81,8 @@ public struct ProtectionSession: Sendable {
 
     public mutating func updateAgentCount(
         _ agentCount: Int,
-        now: Date
+        now: Date,
+        confirmedFinish: Bool = false
     ) -> [SessionEffect] {
         guard isEnabled else {
             return []
@@ -112,6 +113,10 @@ public struct ProtectionSession: Sendable {
 
         guard hasSeenAgent else {
             return []
+        }
+
+        if confirmedFinish {
+            return returnToAgentWaiting()
         }
 
         if noAgentSince == nil {

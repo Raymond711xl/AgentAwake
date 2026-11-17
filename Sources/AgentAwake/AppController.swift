@@ -1,6 +1,9 @@
 import AgentAwakeCore
+import AppKit
+import ApplicationServices
 import Combine
 import Foundation
+import OSLog
 
 @MainActor
 final class AppController: ObservableObject {
@@ -10,22 +13,36 @@ final class AppController: ObservableObject {
     @Published private(set) var runningAgents: [RunningAgent] = []
     @Published private(set) var statusText = "已关闭 · 使用系统原设置"
     @Published private(set) var remainingText: String?
+    @Published private(set) var chatDetectionEnabled: Bool
+    @Published private(set) var chatState: ChatGPTChatDetector.State = .noComposer
 
     var onStatusChange: (() -> Void)?
 
     private let detector: SystemAgentDetector
+    private let chatDetector = ChatGPTChatDetector()
     private let powerController: PowerAssertionController
     private let completionSoundPlayer: CompletionSoundPlayer
     private var session: ProtectionSession
     private var monitorTimer: Timer?
-    private var leaseCheckTick = 0
-    private var reconciliationTick = 0
+    private var nextReconciliationAt: TimeInterval = 0
     private var isScanning = false
     private var pendingAgentRefresh = false
     private var pendingFullReconciliation = false
     private var scanGeneration = 0
+    private var chatScanGeneration = 0
+    private var isScanningChat = false
+    private var localAgents: [RunningAgent] = []
     private var idleStatusText = "已关闭 · 使用系统原设置"
     private var waitingStatusText = "已开启 · 等待 Agent"
+
+    private static let chatPreferenceKey = "chatGPTChatDetectionEnabled"
+    private static let chatLogger = Logger(
+        subsystem: "com.raymond.agentawake", category: "ChatDetection"
+    )
+    private static let chatAgent = RunningAgent(
+        kind: .chatGPT, sessionID: "desktop-chat", activityLogPath: "",
+        source: .accessibility, surface: .chatGPTChat
+    )
 
     init(
         detector: SystemAgentDetector = SystemAgentDetector(),
@@ -37,6 +54,10 @@ final class AppController: ObservableObject {
         self.completionSoundPlayer = completionSoundPlayer ?? .shared
         self.selectedMode = .off
         self.session = ProtectionSession(mode: .off)
+        self.chatDetectionEnabled = UserDefaults.standard.bool(forKey: Self.chatPreferenceKey)
+        if chatDetectionEnabled, !AXIsProcessTrusted() {
+            chatState = .permissionRequired
+        }
     }
 
     func setMode(_ mode: ProtectionMode) {
@@ -71,6 +92,7 @@ final class AppController: ObservableObject {
         if mode.isAgentMode {
             startAgentEventMonitoring()
             refreshAgents(forceReconciliation: true)
+            refreshChat()
         }
     }
 
@@ -82,13 +104,43 @@ final class AppController: ObservableObject {
         selectedMode = .off
     }
 
+    func setChatDetectionEnabled(_ enabled: Bool) {
+        guard enabled != chatDetectionEnabled else { return }
+        chatDetectionEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: Self.chatPreferenceKey)
+        chatScanGeneration += 1
+        updateChatState(enabled && !AXIsProcessTrusted() ? .permissionRequired : .noComposer)
+        refreshChat()
+    }
+
+    func openChatAccessibilitySettings() {
+        guard chatDetectionEnabled else { return }
+        let promptKey = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
+        if !AXIsProcessTrustedWithOptions([promptKey: true] as CFDictionary) {
+            updateChatState(.permissionRequired)
+            if let settings = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
+            ) {
+                NSWorkspace.shared.open(settings)
+            }
+        }
+    }
+
+    func refreshChatPermissionStatus() {
+        guard chatDetectionEnabled else { return }
+        if !AXIsProcessTrusted() {
+            updateChatState(.permissionRequired)
+        } else if chatState == .permissionRequired {
+            updateChatState(.noComposer)
+        }
+        refreshChat()
+    }
+
     private func startMonitoring() {
         guard monitorTimer == nil else {
             return
         }
 
-        leaseCheckTick = 0
-        reconciliationTick = 0
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.handleTimerTick()
@@ -102,12 +154,15 @@ final class AppController: ObservableObject {
         monitorTimer?.invalidate()
         monitorTimer = nil
         detector.stopMonitoring()
-        leaseCheckTick = 0
-        reconciliationTick = 0
+        nextReconciliationAt = 0
         isScanning = false
         pendingAgentRefresh = false
         pendingFullReconciliation = false
         scanGeneration += 1
+        chatScanGeneration += 1
+        localAgents = []
+        chatState = chatDetectionEnabled && !AXIsProcessTrusted()
+            ? .permissionRequired : .noComposer
     }
 
     private func handleTimerTick() {
@@ -119,17 +174,12 @@ final class AppController: ObservableObject {
         }
 
         if session.mode.isAgentMode {
-            leaseCheckTick += 1
-            reconciliationTick += 1
-
-            if reconciliationTick >= 900 {
-                reconciliationTick = 0
-                leaseCheckTick = 0
-                refreshAgents(forceReconciliation: true)
-            } else if leaseCheckTick >= 60 {
-                leaseCheckTick = 0
-                refreshAgents()
+            if !isScanning,
+               ProcessInfo.processInfo.systemUptime >= nextReconciliationAt
+            {
+                refreshAgents(checkForMissedEvents: true)
             }
+            refreshChat()
         }
 
         refreshPresentation(now: now)
@@ -144,7 +194,8 @@ final class AppController: ObservableObject {
     }
 
     private func refreshAgents(
-        forceReconciliation: Bool = false
+        forceReconciliation: Bool = false,
+        checkForMissedEvents: Bool = false
     ) {
         guard session.isEnabled,
               session.mode.isAgentMode
@@ -164,9 +215,12 @@ final class AppController: ObservableObject {
         let detector = self.detector
 
         Task.detached(priority: .utility) {
+            let scanStartedAt = ProcessInfo.processInfo.systemUptime
             let agents = detector.runningAgents(
-                forceReconciliation: forceReconciliation
+                forceReconciliation: forceReconciliation,
+                checkForMissedEvents: checkForMissedEvents
             )
+            let scanFinishedAt = ProcessInfo.processInfo.systemUptime
 
             await MainActor.run { [weak self] in
                 guard let self else {
@@ -181,15 +235,15 @@ final class AppController: ObservableObject {
                 }
 
                 self.isScanning = false
-                self.runningAgents = agents
-                let now = Date()
-                self.apply(
-                    self.session.updateAgentCount(
-                        agents.count,
-                        now: now
-                    ),
-                    now: now
-                )
+                if forceReconciliation || checkForMissedEvents {
+                    // A successful file-event subscription can still miss
+                    // appends. Back off when checking a large session history.
+                    let scanDuration = scanFinishedAt - scanStartedAt
+                    let interval = min(60, max(5, scanDuration * 200))
+                    self.nextReconciliationAt = scanFinishedAt + interval
+                }
+                self.localAgents = agents
+                self.applyAgentActivity(now: Date())
 
                 let shouldRefreshAgain = self.pendingAgentRefresh
                 let shouldReconcile = self.pendingFullReconciliation
@@ -202,6 +256,56 @@ final class AppController: ObservableObject {
                 }
             }
         }
+    }
+
+    private func refreshChat() {
+        guard session.isEnabled, session.mode.isAgentMode,
+              chatDetectionEnabled, !isScanningChat else { return }
+
+        isScanningChat = true
+        let generation = chatScanGeneration
+        let detector = chatDetector
+        let processIDs = NSRunningApplication.runningApplications(
+            withBundleIdentifier: ChatGPTChatDetector.bundleIdentifier
+        ).map(\.processIdentifier)
+
+        Task.detached(priority: .utility) { [weak self] in
+            let state = detector.state(for: processIDs)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isScanningChat = false
+                guard self.chatScanGeneration == generation else { return }
+                self.updateChatState(state)
+            }
+        }
+    }
+
+    private func updateChatState(_ state: ChatGPTChatDetector.State) {
+        guard state != chatState else { return }
+        let wasGenerating = chatState == .generating
+        chatState = state
+        if state == .generating {
+            Self.chatLogger.info("Chat composer detected generating")
+        } else if wasGenerating {
+            Self.chatLogger.info("Chat generating control disappeared")
+        }
+        if session.isEnabled, session.mode.isAgentMode {
+            applyAgentActivity(now: Date(), confirmedFinish: wasGenerating && state == .idle)
+        }
+    }
+
+    private func applyAgentActivity(now: Date, confirmedFinish: Bool = false) {
+        var agents = localAgents
+        if chatState == .generating {
+            agents.append(Self.chatAgent)
+        }
+        if runningAgents != agents {
+            runningAgents = agents
+        }
+        apply(
+            session.updateAgentCount(agents.count, now: now, confirmedFinish: confirmedFinish),
+            now: now
+        )
     }
 
     private func apply(_ effects: [SessionEffect], now: Date) {
@@ -273,7 +377,7 @@ final class AppController: ObservableObject {
         {
             statusText = "确认 Agent 是否结束…"
         } else if isProtecting, session.mode.isAgentMode {
-            let names = Array(Set(runningAgents.map(\.kind.rawValue))).sorted()
+            let names = Set(runningAgents.map(\.displayName)).sorted()
             statusText = "\(names.joined(separator: "、")) 工作中 · 临时接管休眠"
         } else if isProtecting {
             statusText = "定时防休眠 · 倒计时中"

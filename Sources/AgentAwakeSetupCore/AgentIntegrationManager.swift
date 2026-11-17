@@ -101,19 +101,138 @@ public enum AgentBridgeState: Equatable, Sendable {
     case needsRepair
 }
 
+public enum AgentBridgeLifecycleEvent: String, CaseIterable, Identifiable, Sendable {
+    case start
+    case heartbeat
+    case stop
+
+    public var id: String { rawValue }
+}
+
+public struct AgentBridgeCommand: Identifiable, Equatable, Sendable {
+    public let event: AgentBridgeLifecycleEvent
+    public let text: String
+
+    public var id: String { event.id }
+
+    public init(event: AgentBridgeLifecycleEvent, text: String) {
+        self.event = event
+        self.text = text
+    }
+}
+
+public enum AgentBridgeCommandError: LocalizedError, Equatable, Sendable {
+    case invalidProviderID
+    case invalidDisplayName
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidProviderID:
+            return "Agent ID 只能使用字母、数字、点、横线或下划线。"
+        case .invalidDisplayName:
+            return "显示名称不能为空，且不能包含控制字符。"
+        }
+    }
+}
+
+public struct AgentBridgeCommandSet: Equatable, Sendable {
+    public static let sessionVariable = "$AGENT_SESSION_ID"
+
+    public let providerID: String
+    public let displayName: String
+    public let commands: [AgentBridgeCommand]
+
+    public var allCommandsText: String {
+        commands.map(\.text).joined(separator: "\n")
+    }
+
+    public init(
+        helperPath: String,
+        providerID: String,
+        displayName: String
+    ) throws {
+        let normalizedProviderID = providerID
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard Self.isValidProviderID(normalizedProviderID) else {
+            throw AgentBridgeCommandError.invalidProviderID
+        }
+
+        let normalizedDisplayName = displayName
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard Self.isValidDisplayName(normalizedDisplayName) else {
+            throw AgentBridgeCommandError.invalidDisplayName
+        }
+
+        self.providerID = normalizedProviderID
+        self.displayName = normalizedDisplayName
+
+        let commonArguments = [
+            Self.singleQuotedShellArgument(helperPath),
+            "bridge",
+            "--provider \(Self.singleQuotedShellArgument(normalizedProviderID))",
+            "--display-name \(Self.singleQuotedShellArgument(normalizedDisplayName))",
+            #"--session "$AGENT_SESSION_ID""#
+        ]
+        self.commands = AgentBridgeLifecycleEvent.allCases.map { event in
+            AgentBridgeCommand(
+                event: event,
+                text: (commonArguments + ["--event \(event.rawValue)"])
+                    .joined(separator: " ")
+            )
+        }
+    }
+
+    public func command(
+        for event: AgentBridgeLifecycleEvent
+    ) -> AgentBridgeCommand? {
+        commands.first { $0.event == event }
+    }
+
+    private static func isValidProviderID(_ value: String) -> Bool {
+        guard !value.isEmpty,
+              value.count <= 64,
+              let first = value.unicodeScalars.first,
+              (48...57).contains(first.value)
+                || (97...122).contains(first.value)
+        else {
+            return false
+        }
+
+        return value.unicodeScalars.allSatisfy { scalar in
+            switch scalar.value {
+            case 48...57, 97...122:
+                return true
+            default:
+                return scalar == "." || scalar == "-" || scalar == "_"
+            }
+        }
+    }
+
+    private static func isValidDisplayName(_ value: String) -> Bool {
+        guard !value.isEmpty, value.count <= 64 else {
+            return false
+        }
+        return value.unicodeScalars.allSatisfy {
+            !CharacterSet.controlCharacters.contains($0)
+        }
+    }
+
+    private static func singleQuotedShellArgument(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+}
+
 public struct AgentBridgeSnapshot: Equatable, Sendable {
     public let state: AgentBridgeState
     public let helperPath: String
-    public let commandTemplate: String
 
     public init(
         state: AgentBridgeState,
-        helperPath: String,
-        commandTemplate: String
+        helperPath: String
     ) {
         self.state = state
         self.helperPath = helperPath
-        self.commandTemplate = commandTemplate
     }
 }
 
@@ -171,15 +290,15 @@ public final class AgentIntegrationManager: @unchecked Sendable {
             .appendingPathComponent("bridge-enabled.json")
     }
 
-    public var bridgeCommandTemplate: String {
-        [
-            singleQuotedShellArgument(installedHelperURL.path),
-            "bridge",
-            "--provider custom-agent",
-            "--display-name 'Custom Agent'",
-            "--session SESSION_ID",
-            "--event EVENT"
-        ].joined(separator: " ")
+    public func bridgeCommands(
+        providerID: String = "my-agent",
+        displayName: String = "My Agent"
+    ) throws -> AgentBridgeCommandSet {
+        try AgentBridgeCommandSet(
+            helperPath: installedHelperURL.path,
+            providerID: providerID,
+            displayName: displayName
+        )
     }
 
     public func detectedProviders() -> [AgentIntegrationProvider] {
@@ -205,8 +324,7 @@ public final class AgentIntegrationManager: @unchecked Sendable {
         }
         return AgentBridgeSnapshot(
             state: state,
-            helperPath: installedHelperURL.path,
-            commandTemplate: bridgeCommandTemplate
+            helperPath: installedHelperURL.path
         )
     }
 

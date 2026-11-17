@@ -9,6 +9,10 @@ public struct AgentKind: Hashable, Codable, Sendable {
         uncheckedIdentifier: "claude",
         displayName: "Claude"
     )
+    public static let chatGPT = AgentKind(
+        uncheckedIdentifier: "chatgpt",
+        displayName: "ChatGPT"
+    )
     public static let allCases: [AgentKind] = [.codex, .claude]
 
     public let identifier: String
@@ -38,6 +42,8 @@ public struct AgentKind: Hashable, Codable, Sendable {
             resolvedDisplayName = displayName ?? Self.codex.displayName
         case Self.claude.identifier:
             resolvedDisplayName = displayName ?? Self.claude.displayName
+        case Self.chatGPT.identifier:
+            resolvedDisplayName = displayName ?? Self.chatGPT.displayName
         default:
             resolvedDisplayName = displayName ?? normalizedIdentifier
         }
@@ -155,6 +161,7 @@ public enum AgentConfidence: String, Codable, Sendable {
 
 public enum AgentStatusSource: String, Codable, Sendable {
     case automaticLocal
+    case accessibility
     case preciseHook
     case preciseBridge
 
@@ -168,7 +175,7 @@ public enum AgentStatusSource: String, Codable, Sendable {
 
     public var confidence: AgentConfidence {
         switch self {
-        case .automaticLocal:
+        case .automaticLocal, .accessibility:
             return .automatic
         case .preciseHook, .preciseBridge:
             return .precise
@@ -180,6 +187,11 @@ public enum AgentActivityEventKind: String, Codable, Sendable {
     case start
     case heartbeat
     case stop
+}
+
+public enum AgentSurface: String, Sendable {
+    case chatGPTChat = "ChatGPT Chat"
+    case chatGPTWork = "ChatGPT Work"
 }
 
 public struct AgentActivityEvent: Equatable, Sendable {
@@ -256,6 +268,9 @@ public struct RunningAgent: Identifiable, Equatable, Sendable {
     public let sessionID: String
     public let activityLogPath: String
     public let source: AgentStatusSource
+    public let surface: AgentSurface?
+
+    public var displayName: String { surface?.rawValue ?? kind.displayName }
 
     public var id: String {
         "\(kind.identifier.count):\(kind.identifier):\(sessionID)"
@@ -269,11 +284,13 @@ public struct RunningAgent: Identifiable, Equatable, Sendable {
         kind: AgentKind,
         sessionID: String,
         activityLogPath: String,
-        source: AgentStatusSource = .automaticLocal
+        source: AgentStatusSource = .automaticLocal,
+        surface: AgentSurface? = nil
     ) {
         self.kind = kind
         self.sessionID = sessionID
         self.activityLogPath = activityLogPath
         self.source = source
+        self.surface = surface
     }
 }

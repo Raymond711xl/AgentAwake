@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  macOS 13+ · Apple Silicon / Intel · Current version 0.5.0
+  macOS 13+ · Apple Silicon / Intel · Current version 0.5.4
 </p>
 
 <p align="center">
@@ -43,22 +43,24 @@ AgentAwake does not read prompts, response bodies, token details, or API keys.
 
 - **One five-position slider** — Off, 30 minutes, 1 hour, 2 hours, and Agent.
   The slider is both the selector and the switch.
-- **Agent-aware protection** — Detects active local Codex and Claude tasks and
-  keeps the system and display awake only while work is in progress.
+- **Agent-aware protection** — Detects active local ChatGPT Work, Codex, and
+  Claude tasks. Leaving ChatGPT open while idle does not hold a sleep assertion.
+- **Ordinary Chat replies (preview)** — With Accessibility permission, AgentAwake
+  reads the Stop button in the desktop Chat composer to detect generation.
 - **Hooks first, local logs as fallback** — Uses lifecycle Hooks for timely
   state changes. Without Hooks, it incrementally reads local task logs for a
   zero-configuration fallback instead of trusting long-lived process names.
 - **Event-driven and bounded** — Agent mode reuses one native macOS file-event
-  stream, reads only appended bytes, reconciles every 15 minutes, and caps both
-  session state and parser buffers.
+  stream and periodically checks local logs for missed updates. It reads appended
+  bytes from cached logs and caps both session state and parser buffers.
 - **Universal Bridge** — Third-party agents that can run lifecycle commands can
   send `start`, `heartbeat`, and `stop`. The one-shot helper writes local state
   and exits immediately.
 - **Download and run** — Regular users need no Codex, Cloud, Xcode, Swift, or
   terminal. Hooks and login-item behavior are optional settings.
-- **Automatic release and renewal** — Agent mode uses a 120-second lease,
-  renews it every 60 seconds, and releases it five seconds after the last agent
-  finishes. Stale activity also expires automatically.
+- **Automatic release and renewal** — Agent mode uses a 120-second lease and
+  renews it every 60 seconds. Protection releases once the last task ends.
+  A confirmed return to an idle Chat composer releases it immediately.
 - **Timeout-protected power assertions** — Both timed and Agent modes use
   temporary IOKit assertions, so no permanent system setting is left behind.
 - **Clear menu bar status** — Shows the current mode, countdown, waiting state,
@@ -76,7 +78,7 @@ AgentAwake does not read prompts, response bodies, token details, or API keys.
 | 30 minutes | Immediately keeps the system and display awake | Releases after 30 minutes and returns to Off |
 | 1 hour | Immediately keeps the system and display awake | Releases after 1 hour and returns to Off |
 | 2 hours | Immediately keeps the system and display awake | Releases after 2 hours and returns to Off |
-| Agent | Only listens when idle; temporarily stays awake while Codex or Claude is working | Releases after the task, but remains in Agent mode to wait for the next one |
+| Agent | Listens when idle; keeps the Mac awake for active local ChatGPT Work, Codex, or Claude tasks | Releases after the task and waits for the next one |
 
 ## Requirements
 
@@ -117,19 +119,21 @@ available and require no further setup.
 3. To stop immediately, drag it back to Off (`未开启`); the temporary power
    assertions are released at once.
 
-Timed modes start their countdown immediately. Agent mode waits without holding
-an assertion, then takes over only when it detects active Codex or Claude work.
+Timed modes start their countdown immediately. Agent mode takes over when it
+detects a task. For ordinary Chat, enable Chat reply detection in AgentAwake,
+then allow AgentAwake in System Settings → Privacy & Security → Accessibility.
+Detection checks the desktop Chat composer in English and Simplified or Traditional Chinese.
 
 ### 3. Optional settings
 
 Click Settings at the bottom of the menu bar panel to manage:
 
-- launch at login;
+- launch at login and ordinary Chat reply detection;
 - Codex Hooks;
 - Claude Hooks;
-- the custom Agent Bridge.
+- the universal Agent Bridge.
 
-Agent mode reads existing local Codex and Claude activity records by default,
+Agent mode reads existing local ChatGPT Work, Codex, and Claude activity records,
 so Hooks are not a prerequisite. Settings reports local detection state and
 only enables Hook installation for agents that exist on the Mac. It never
 creates configuration for absent software. Only after the user explicitly
@@ -154,11 +158,18 @@ Agent mode still works without Hooks, although state transitions may be less
 immediate. Installation, repair, and removal all happen in Settings without a
 terminal.
 
-If a third-party agent can execute lifecycle commands, enable Bridge in
-Settings and copy the one-line template. Replace `EVENT` with `start`,
-`heartbeat`, or `stop`, and keep the same `SESSION_ID` for one task. Bridge is
-not packet interception and does not infer activity from a resident process;
-the agent must invoke it at the correct lifecycle points.
+If a third-party agent can execute lifecycle commands, enable Universal Agent
+Bridge in Settings. Enter an Agent ID and display name, then copy the separate
+Task Start, Running, and Task End commands. Do not run all three commands in a
+terminal; place each one in the matching lifecycle hook. Start and stop are
+required, while long-running tasks need periodic heartbeats.
+
+Replace `$AGENT_SESSION_ID` in all three commands with the agent's stable task
+ID variable, such as `task_id`, `session_id`, or `conversation_id`. If the ID
+arrives in a hook's JSON input, read it in the hook script first. Keep the same
+value for all events in one task. Bridge is not packet interception and does
+not infer activity from a resident process; the agent must invoke it at the
+correct lifecycle points.
 
 ## Verify that system settings remain unchanged
 
@@ -177,9 +188,9 @@ from another app make it harder to verify that sleep control has been returned.
 
 ## How agent detection works
 
-AgentAwake does not decide activity by checking whether a `codex` or `claude`
-process exists. App servers, sandboxes, and streaming processes may remain
-alive long after a task has stopped.
+AgentAwake checks task start, completion, and cancellation events. ChatGPT Work
+and Codex share a local session directory, and AgentAwake uses the session
+metadata to label them separately. Local task detection continues in the background.
 
 Lifecycle events are the preferred source:
 
@@ -189,9 +200,10 @@ Lifecycle events are the preferred source:
 
 Once Hook state is available for a session, it overrides a potentially stale
 transcript result. Without Hooks, one shared native file-event stream triggers
-incremental reads of only the appended bytes in local Codex and Claude task
-logs, with a 15-minute reconciliation fallback. A state with no new event for
-30 minutes expires automatically.
+incremental reads of local task logs. A fallback checks log sizes and modification
+times for cached sessions and nearby Codex dates every 5 to 60 seconds, depending
+on the cost of the previous check. A less frequent reconciliation covers older
+sessions. A state with no new event for 30 minutes expires automatically.
 
 ## Privacy and safety
 
@@ -255,10 +267,10 @@ docs/RELEASING.md            Dual-architecture DMG and GitHub Release workflow
 ## Current scope
 
 AgentAwake timed modes do not require an agent. Agent-aware mode currently
-supports automatic local detection for Codex and Claude, plus precise Bridge
-events from custom agents that can execute lifecycle commands. Zero-setup
-adapters for Cursor, OpenCode, Kimi, and others still require individual
-verification; a process name or encrypted traffic alone is not treated as
-support. AgentAwake is not a system power-settings manager and does not replace
-macOS sleep policy; it only postpones idle sleep during the selected protection
-window.
+supports automatic local detection for ChatGPT Work, Codex, and Claude, plus
+precise events from hook-capable agents connected through Universal Agent Bridge.
+Ordinary Chat detection follows the controls available to macOS Accessibility.
+Switching conversations, closing a window, or changing modes can hide those controls.
+AgentAwake is not a system
+power-settings manager and does not replace macOS sleep policy; it only
+postpones idle sleep during the selected protection window.
