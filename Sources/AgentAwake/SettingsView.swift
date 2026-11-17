@@ -1,8 +1,10 @@
 import AgentAwakeSetupCore
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var controller: IntegrationSettingsController
+    @ObservedObject var appController: AppController
     @AppStorage(CompletionSoundPlayer.preferenceKey)
     private var completionSoundEnabled = true
     @State private var bridgeProviderID = "my-agent"
@@ -30,6 +32,10 @@ struct SettingsView: View {
         .frame(width: 560, height: 650)
         .onAppear {
             controller.refresh()
+            appController.refreshChatPermissionStatus()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            appController.refreshChatPermissionStatus()
         }
     }
 
@@ -105,12 +111,14 @@ struct SettingsView: View {
         settingsCard(title: "Agent 活动检测", systemImage: "puzzlepiece") {
             VStack(alignment: .leading, spacing: 14) {
                 Text(
-                    "自动检测无需配置；精确跟踪需要按 Agent 启用。" +
-                    "Hooks 失效时会自动回退到本地活动记录。"
+                    "自动读取 ChatGPT Work、Codex 和 Claude 的本地任务状态。Hooks 可选。"
                 )
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+                chatDetectionSettings
+                Divider()
 
                 ForEach(controller.integrations) { integration in
                     integrationRow(integration)
@@ -120,6 +128,53 @@ struct SettingsView: View {
                     }
                 }
             }
+        }
+    }
+
+    private var chatDetectionSettings: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Toggle(
+                "识别普通 Chat 回复",
+                isOn: Binding(
+                    get: { appController.chatDetectionEnabled },
+                    set: appController.setChatDetectionEnabled
+                )
+            )
+
+            Text("通过辅助功能读取 Chat 输入框的停止按钮。适用于 ChatGPT 桌面版打开的普通对话。")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if appController.chatDetectionEnabled {
+                if appController.chatState == .permissionRequired {
+                    Button("打开辅助功能设置", action: appController.openChatAccessibilitySettings)
+                        .controlSize(.small)
+                    Text("在“隐私与安全性 → 辅助功能”中允许 AgentAwake。")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(chatDetectionStatus)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var chatDetectionStatus: String {
+        guard appController.selectedMode.isAgentMode else {
+            return "选择 Agent 模式后开始识别。"
+        }
+        switch appController.chatState {
+        case .permissionRequired:
+            return "需要辅助功能权限。"
+        case .noComposer:
+            return "等待识别桌面版普通 Chat 对话。"
+        case .idle:
+            return "普通 Chat 已识别，等待回复。"
+        case .generating:
+            return "普通 Chat 正在回复。"
         }
     }
 

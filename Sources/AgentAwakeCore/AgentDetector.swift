@@ -89,6 +89,13 @@ public enum AgentActivityLineParser {
                             .utf8
                     ),
                     isActive: false
+                ),
+                AgentActivityPattern(
+                    data: Data(
+                        #""type":"event_msg","payload":{"type":"turn_aborted""#
+                            .utf8
+                    ),
+                    isActive: false
                 )
             ]
         case .claude:
@@ -124,6 +131,7 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
         var partialLine = Data()
         var isActive = false
         var modificationDate = Date.distantPast
+        var surface: AgentSurface?
     }
 
     private let fileManager: FileManager
@@ -203,6 +211,15 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
     public func runningAgents(
         forceReconciliation: Bool = false
     ) -> [RunningAgent] {
+        runningAgents(
+            forceReconciliation: forceReconciliation, checkForMissedEvents: false
+        )
+    }
+
+    public func runningAgents(
+        forceReconciliation: Bool,
+        checkForMissedEvents: Bool
+    ) -> [RunningAgent] {
         refreshEventMonitorConfigurationIfNeeded()
         let now = Date()
         let hookSnapshot = hookActivityStore.snapshot(now: now)
@@ -212,14 +229,20 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
             needsFullReconciliation = true
         }
 
-        if needsFullReconciliation {
+        let fullScanDue = lastFullReconciliationAt.map {
+            now.timeIntervalSince($0) >= 60
+        } ?? true
+        if needsFullReconciliation || (checkForMissedEvents && fullScanDue) {
             reconcileAllLogs(now: now)
         } else {
             updateDirtyLogs(now: now)
+            if checkForMissedEvents {
+                reconcileRecentLogs(now: now)
+            }
         }
 
         pruneFileStates(now: now)
-        enforceResourceLimits()
+        enforceResourceLimits(now: now)
         let transcriptAgents = activeTranscriptAgents(now: now)
         let merged = merge(
             transcriptAgents: transcriptAgents,
@@ -351,7 +374,7 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
             needsFullReconciliation = true
         }
         eventMonitor = nil
-        monitoredPaths.removeAll(keepingCapacity: false)
+        monitoredPaths = paths
         eventMonitorNeedsRestart = false
         monitoredPathCount = 0
         lock.unlock()
@@ -367,12 +390,7 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
         let shouldKeepMonitor = eventHandler != nil && started
         if shouldKeepMonitor {
             eventMonitor = monitor
-            monitoredPaths = paths
             monitoredPathCount = paths.count
-        } else if eventHandler != nil {
-            // Native events are unavailable. The 60-second lease check will
-            // retry this setup and perform a bounded reconciliation.
-            needsFullReconciliation = true
         }
         lock.unlock()
 
@@ -390,11 +408,7 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
             enforceBufferLimit()
         }
 
-        fileStates = fileStates.filter { url, state in
-            candidateURLs.contains(url)
-                || now.timeIntervalSince(state.modificationDate)
-                    <= recentFileWindow
-        }
+        fileStates = fileStates.filter { url, _ in candidateURLs.contains(url) }
         dirtyURLs.removeAll(keepingCapacity: true)
         needsFullReconciliation = false
         fullReconciliationCount += 1
@@ -419,7 +433,31 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
         }
     }
 
-    private func candidateLogs(now: Date) -> [Candidate] {
+    private func reconcileRecentLogs(now: Date) {
+        let cachedURLs = Set(fileStates.keys)
+        for url in cachedURLs {
+            // Fetch fresh metadata even if this URL came from an enumerator.
+            let freshURL = URL(fileURLWithPath: url.path)
+            guard let candidate = candidate(for: freshURL, now: now) else {
+                fileStates.removeValue(forKey: url)
+                continue
+            }
+            updateState(for: candidate)
+            enforceBufferLimit()
+        }
+        for candidate in candidateLogs(
+            now: now, recentCodexFoldersOnly: true, excluding: cachedURLs
+        ) {
+            updateState(for: candidate)
+            enforceBufferLimit()
+        }
+    }
+
+    private func candidateLogs(
+        now: Date,
+        recentCodexFoldersOnly: Bool = false,
+        excluding excludedURLs: Set<URL> = []
+    ) -> [Candidate] {
         let cutoff = now.addingTimeInterval(-recentFileWindow)
         let keys: Set<URLResourceKey> = [
             .isRegularFileKey,
@@ -430,20 +468,32 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
         var candidates: [Candidate] = []
 
         for (adapterIndex, adapter) in adapters.enumerated() {
-            guard adapter.capabilities.contains(.automaticLocal) else {
+            guard adapter.capabilities.contains(.automaticLocal),
+                  !recentCodexFoldersOnly || adapter.identity == .codex
+            else {
                 continue
             }
-            for root in adapter.logRoots {
+            let roots = recentCodexFoldersOnly
+                ? adapter.logRoots.flatMap { nearbyCodexFolders(in: $0, now: now) }
+                : adapter.logRoots
+            var options: FileManager.DirectoryEnumerationOptions = [
+                .skipsHiddenFiles, .skipsPackageDescendants
+            ]
+            if recentCodexFoldersOnly {
+                options.insert(.skipsSubdirectoryDescendants)
+            }
+            for root in roots {
                 guard let enumerator = fileManager.enumerator(
                     at: root,
                     includingPropertiesForKeys: Array(keys),
-                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                    options: options
                 ) else {
                     continue
                 }
 
                 while let url = enumerator.nextObject() as? URL {
                     guard url.pathExtension == "jsonl",
+                          !excludedURLs.contains(url.standardizedFileURL),
                           let values = try? url.resourceValues(forKeys: keys),
                           values.isRegularFile == true,
                           let modificationDate = values.contentModificationDate,
@@ -477,6 +527,24 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
         }
 
         return trimmedCandidates(candidates, limit: maximumCandidates)
+    }
+
+    private func nearbyCodexFolders(in root: URL, now: Date) -> [URL] {
+        let calendar = Calendar(identifier: .gregorian)
+        // The desktop and CLI can place rollouts on different dates near
+        // midnight. Older resumed sessions are covered by the cached URLs and
+        // the less frequent full scan.
+        return (-1...1).compactMap { dayOffset in
+            guard let date = calendar.date(
+                byAdding: .day, value: dayOffset, to: now
+            ) else { return nil }
+            let components = calendar.dateComponents([.year, .month, .day], from: date)
+            guard let year = components.year, let month = components.month,
+                  let day = components.day
+            else { return nil }
+            let path = String(format: "%04d/%02d/%02d", year, month, day)
+            return root.appendingPathComponent(path, isDirectory: true)
+        }
     }
 
     private func trimmedCandidates(
@@ -591,6 +659,13 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
         defer { try? handle.close() }
 
         do {
+            // FSEvents can first see a new log while its header is still being
+            // written; try again while the header can still be incomplete.
+            if state.kind == .codex, state.surface == nil,
+               state.offset < UInt64(CodexSessionMetadata.maximumHeaderBytes)
+            {
+                state.surface = CodexSessionMetadata.surface(from: handle)
+            }
             try handle.seek(toOffset: state.offset)
             while let chunk = try handle.read(upToCount: 262_144),
                   !chunk.isEmpty
@@ -615,12 +690,17 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
     ) {
         state.offset = fileSize
         state.partialLine.removeAll(keepingCapacity: false)
+        state.surface = nil
         guard fileSize > 0,
               let handle = try? FileHandle(forReadingFrom: url)
         else {
             return
         }
         defer { try? handle.close() }
+
+        if state.kind == .codex {
+            state.surface = CodexSessionMetadata.surface(from: handle)
+        }
 
         let patterns = adapters[state.adapterIndex].bootstrapPatterns
         let overlapCount = max(
@@ -632,6 +712,7 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
             : 0
         var cursor = fileSize
         var laterPrefix = Data()
+        var hasCompleteLine = false
 
         do {
             while cursor > lowerBound {
@@ -645,6 +726,18 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
                 }
 
                 var searchWindow = chunk
+                if !hasCompleteLine {
+                    guard let newline = searchWindow.lastIndex(of: 0x0A) else {
+                        continue
+                    }
+                    let completeEnd = searchWindow.index(after: newline)
+                    // A later append must be able to read this whole record.
+                    state.offset = cursor + UInt64(
+                        completeEnd - searchWindow.startIndex
+                    )
+                    searchWindow.removeSubrange(completeEnd...)
+                    hasCompleteLine = true
+                }
                 searchWindow.append(laterPrefix)
                 if let latest = latestActivityState(
                     in: searchWindow,
@@ -653,7 +746,10 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
                     state.isActive = latest
                     return
                 }
-                laterPrefix = Data(chunk.prefix(overlapCount))
+                laterPrefix = Data(searchWindow.prefix(overlapCount))
+            }
+            if !hasCompleteLine, lowerBound == 0 {
+                state.offset = 0
             }
         } catch {
             state.isActive = false
@@ -696,25 +792,21 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
     }
 
     private func pruneFileStates(now: Date) {
-        for (url, var state) in fileStates where state.isActive {
-            if now.timeIntervalSince(state.modificationDate)
-                > activeSilenceTimeout
-            {
-                state.isActive = false
-                fileStates[url] = state
-            }
-        }
+        // Silence expires the lease, not the last known lifecycle event. A
+        // still-open turn can resume writing without emitting another start.
         fileStates = fileStates.filter { _, state in
             now.timeIntervalSince(state.modificationDate) <= recentFileWindow
         }
     }
 
-    private func enforceResourceLimits() {
+    private func enforceResourceLimits(now: Date) {
         if fileStates.count > maximumCachedSessions {
             let retainedURLs = Set(
                 fileStates.sorted {
-                    if $0.value.isActive != $1.value.isActive {
-                        return $0.value.isActive && !$1.value.isActive
+                    let lhsActive = isStateCurrentlyActive($0.value, now: now)
+                    let rhsActive = isStateCurrentlyActive($1.value, now: now)
+                    if lhsActive != rhsActive {
+                        return lhsActive
                     }
                     return $0.value.modificationDate
                         > $1.value.modificationDate
@@ -765,7 +857,8 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
                 kind: state.kind,
                 sessionID: state.sessionID,
                 activityLogPath: url.path,
-                source: .automaticLocal
+                source: .automaticLocal,
+                surface: state.surface
             )
         }
     }
@@ -785,8 +878,21 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
             }
             mergedAgents[agent.id] = agent
         }
+        let workSessions = Set(fileStates.values.compactMap { state in
+            state.surface == .chatGPTWork ? state.sessionID : nil
+        })
         for agent in hookSnapshot.activeAgents {
-            mergedAgents[agent.id] = agent
+            if agent.kind == .codex, workSessions.contains(agent.sessionID) {
+                mergedAgents[agent.id] = RunningAgent(
+                    kind: agent.kind,
+                    sessionID: agent.sessionID,
+                    activityLogPath: agent.activityLogPath,
+                    source: agent.source,
+                    surface: .chatGPTWork
+                )
+            } else {
+                mergedAgents[agent.id] = agent
+            }
         }
         return mergedAgents.values.sorted(by: Self.agentSort)
     }
@@ -833,9 +939,9 @@ public final class SystemAgentDetector: AgentDetecting, @unchecked Sendable {
         _ lhs: RunningAgent,
         _ rhs: RunningAgent
     ) -> Bool {
-        if lhs.kind.displayName == rhs.kind.displayName {
+        if lhs.displayName == rhs.displayName {
             return lhs.sessionID < rhs.sessionID
         }
-        return lhs.kind.displayName < rhs.kind.displayName
+        return lhs.displayName < rhs.displayName
     }
 }

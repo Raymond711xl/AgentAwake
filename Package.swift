@@ -42,6 +42,7 @@ let package = Package(
             name: "AgentAwake",
             dependencies: ["AgentAwakeCore", "AgentAwakeSetupCore"],
             linkerSettings: [
+                .linkedFramework("ApplicationServices"),
                 .linkedFramework("ServiceManagement")
             ]
         ),

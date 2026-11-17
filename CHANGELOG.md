@@ -21,6 +21,29 @@ Version numbers follow [Semantic Versioning](https://semver.org/).
   lifecycle hooks, plugin events, or command callbacks. Agents without a
   reliable lifecycle entry point are deferred.
 
+## [0.5.4] - 2026-11-17
+
+### Added / 新增
+
+- Agent 模式识别有本地活动记录的 ChatGPT Work 任务，并在菜单栏与 Codex 分开显示。
+  Agent mode now labels ChatGPT Work and Codex tasks separately when they have
+  local activity records.
+- 普通 Chat 回复检测可在设置中试用，默认关闭。开启并授予 macOS 辅助功能权限后，
+  AgentAwake 通过桌面版 Chat 输入框的停止按钮识别生成状态。确认回复结束且没有其他
+  活跃任务时，释放防休眠。
+  Added an opt-in preview for ordinary Chat replies. With macOS Accessibility
+  permission, AgentAwake detects generation from the desktop composer's Stop
+  button and releases protection once the reply finishes and no other tasks remain.
+
+### Fixed / 修复
+
+- macOS 漏掉文件通知时，Agent 模式会定期补查本地日志，识别开始和结束事件。
+  Agent mode checks local logs for starts and finishes when macOS misses file
+  notifications.
+- 正确识别 Codex 取消事件。日志暂未写完或静默超时的任务继续写入后，可以恢复识别。
+  Codex cancellations are detected, and monitoring recovers from partially
+  written records and tasks that resume after the inactivity timeout.
+
 ## [0.5.1] - 2026-08-03
 
 ### Changed / 变更

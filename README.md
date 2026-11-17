@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  macOS 13+ · Apple Silicon / Intel · 当前版本 0.5.1
+  macOS 13+ · Apple Silicon / Intel · 当前版本 0.5.4
 </p>
 
 <p align="center">
@@ -40,18 +40,20 @@ AgentAwake 不会读取提示词、响应正文、Token 明细或 API 密钥。
 
 - **五档一体式滑轨**：未开启、30 分钟、1 小时、2 小时和 Agent 模式；
   滑轨同时承担选择与开关，不需要额外的启用按钮。
-- **Agent 感知保护**：识别本机正在运行的 Codex 与 Claude 任务，只在任务活跃时
-  保持系统和显示器唤醒。
+- **Agent 感知保护**：识别 ChatGPT Work、Codex 和 Claude 的本机任务，只在任务
+  活跃时保持系统和显示器唤醒。ChatGPT 打开但空闲时不会接管休眠。
+- **普通 Chat 回复检测（试用）**：在辅助功能授权后读取 ChatGPT 桌面版输入框的
+  停止按钮。能识别该按钮的普通 Chat 对话在生成时保持唤醒。
 - **Hooks 优先、日志兜底**：优先使用生命周期 Hooks 获取及时状态；未安装 Hooks
   时，自动增量读取本地任务日志作为零配置兜底，不依赖可能长期常驻的进程名。
-- **事件驱动、缓存有界**：Agent 模式复用一个 macOS 原生文件事件流，只读取新增
-  字节；每 15 分钟低频校准，会话和解析缓冲区都有固定上限。
+- **事件驱动、缓存有界**：Agent 模式复用一个 macOS 原生文件事件流，定期核对本地
+  日志，弥补漏掉的通知。已缓存日志只读新增字节，会话和解析缓冲区都有固定上限。
 - **通用 Bridge**：能运行生命周期命令的第三方 Agent 可发送 `start`、
   `heartbeat`、`stop`；一次性 helper 写入本地状态后立即退出。
 - **下载后直接使用**：普通用户不需要 Codex、Claude、Xcode、Swift 或终端；
   Hooks 与登录项等增强能力都在设置中按需启用。
-- **自动释放与续租**：Agent 模式使用 120 秒短租约，每 60 秒续期；最后一个
-  Agent 结束 5 秒后自动释放，异常失联的状态也会过期。
+- **自动释放与续租**：Agent 模式使用 120 秒短租约，每 60 秒续期。最后一个任务
+  结束后自动释放，普通 Chat 确认恢复空闲时直接释放。
 - **安全的临时断言**：固定时长和 Agent 模式均使用带超时的 IOKit 断言，
   App 异常中止时也不会永久改写系统配置。
 - **清晰的菜单栏状态**：显示当前模式、倒计时、等待状态和正在工作的 Agent；
@@ -67,7 +69,7 @@ AgentAwake 不会读取提示词、响应正文、Token 明细或 API 密钥。
 | 30 分钟 | 立即保持系统与显示器唤醒 | 30 分钟后释放并回到“未开启” |
 | 1 小时 | 立即保持系统与显示器唤醒 | 1 小时后释放并回到“未开启” |
 | 2 小时 | 立即保持系统与显示器唤醒 | 2 小时后释放并回到“未开启” |
-| Agent | 没有任务时只监听；Codex 或 Claude 工作时临时保持唤醒 | 任务结束后释放，但继续留在 Agent 模式等待下一次任务 |
+| Agent | 没有任务时只监听；ChatGPT Work、Codex 或 Claude 有本机任务时保持唤醒 | 任务结束后释放，但继续留在 Agent 模式等待下一次任务 |
 
 ## 系统要求
 
@@ -103,19 +105,21 @@ AgentAwake 不会读取提示词、响应正文、Token 明细或 API 密钥。
 2. 拖动滑块选择 30 分钟、1 小时、2 小时或 Agent。
 3. 需要立即停止时，把滑块拖回“未开启”；临时断言会马上释放。
 
-固定时长模式会立即开始倒计时。Agent 模式在没有任务时只等待，
-检测到 Codex 或 Claude 工作后才接管休眠。
+固定时长模式会立即开始倒计时。Agent 模式在没有任务时只等待，检测到任务后才接管休眠。
+如需识别普通 Chat，在 AgentAwake 设置里打开“识别普通 Chat 回复”，再到“系统设置
+→ 隐私与安全性 → 辅助功能”允许 AgentAwake。识别范围是 ChatGPT 桌面版中可读取
+控件的普通对话，当前匹配英语和简繁中文界面。
 
 ### 3. 可选设置
 
 点击菜单栏面板底部的“设置”，可以按需管理：
 
-- 登录时启动；
+- 登录时启动和普通 Chat 回复检测；
 - Codex Hooks；
 - Claude Hooks；
 - 通用 Agent Bridge。
 
-Agent 模式默认读取本机已有的 Codex 与 Claude 活动记录，因此 Hooks 不是使用
+Agent 模式默认读取本机已有的 ChatGPT Work、Codex 与 Claude 活动记录，因此 Hooks 不是使用
 前置条件。设置页会标明本机检测状态，只允许为实际存在的 Agent 安装 Hooks，
 不会为未安装的软件创建配置。
 AgentAwake 不负责安装或运行大模型；相关 Agent 由用户自行配置，App 只读取
@@ -163,8 +167,8 @@ pmset -g assertions
 
 ## Agent 状态如何识别
 
-AgentAwake 不以 `codex` 或 `claude` 进程是否存在作为判断依据，因为
-app-server、sandbox 和流式进程可能长期常驻。
+AgentAwake 使用任务开始、结束和取消事件判断状态。ChatGPT Work 与 Codex 共用本地
+会话目录，菜单栏按会话元数据区分两者；切到其他 App 不会停掉本地任务检测。
 
 优先数据源是生命周期事件：
 
@@ -173,8 +177,9 @@ app-server、sandbox 和流式进程可能长期常驻。
 - `Stop`、Claude 的 `StopFailure`、`SessionEnd`：结束租约。
 
 同一会话收到 Hook 状态后，Hook 会覆盖可能滞后的 transcript 判断。
-没有 Hooks 时，App 通过一个共享的 macOS 文件事件流监听变化，只增量读取 Codex
-与 Claude 本地任务日志新增的字节，并以 15 分钟低频校准兜底；
+没有 Hooks 时，App 通过一个共享的 macOS 文件事件流监听变化。定期核对文件大小和
+修改时间，发现变动时读取新增记录。已缓存会话和附近日期的 Codex 日志每隔 5 到 60 秒
+核对一次，较早且未缓存的会话由周期性完整校准补查。
 超过 30 分钟没有新事件的状态会自动失效。
 
 ## 隐私与安全
@@ -234,8 +239,8 @@ docs/RELEASING.md            双架构 DMG 与 GitHub Release 流程
 
 ## 当前边界
 
-AgentAwake 的定时模式不依赖任何 Agent；Agent 感知模式当前支持本机运行的
-Codex 与 Claude 自动检测，以及能正确发送生命周期事件的通用 Agent Bridge。
-没有可靠生命周期 Hooks 的 Agent 暂不适配，不能仅凭进程或加密流量宣称支持。
+AgentAwake 的定时模式无需任务来源。Agent 模式支持本机 ChatGPT Work、Codex 和 Claude
+的任务、可读取控件的普通 Chat 回复，以及能发送生命周期事件的通用 Agent Bridge。
+切换对话、关闭窗口或切到其他模式后，若停止按钮不再暴露给辅助功能，普通 Chat 便无法继续识别。
 AgentAwake 不是系统电源设置管理器，也不会替代 macOS 原有睡眠策略；它只在所选
 窗口内临时延后空闲休眠。

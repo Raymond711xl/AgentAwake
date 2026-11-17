@@ -140,12 +140,14 @@ struct StatusPopoverView: View {
             return "确认 Agent 状态…"
         }
 
-        let grouped = Dictionary(grouping: appController.runningAgents, by: \.kind)
+        let grouped = Dictionary(
+            grouping: appController.runningAgents, by: \.displayName
+        )
         return grouped.keys
-            .sorted { $0.rawValue < $1.rawValue }
-            .map { kind in
-                let count = grouped[kind]?.count ?? 0
-                return count > 1 ? "\(kind.rawValue) × \(count)" : kind.rawValue
+            .sorted()
+            .map { name in
+                let count = grouped[name]?.count ?? 0
+                return count > 1 ? "\(name) × \(count)" : name
             }
             .joined(separator: " · ")
     }

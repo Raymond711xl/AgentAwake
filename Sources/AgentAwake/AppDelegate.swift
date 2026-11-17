@@ -44,7 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             integrationSettingsController = IntegrationSettingsController()
         }
         let settingsWindowController = SettingsWindowController(
-            settingsController: integrationSettingsController
+            settingsController: integrationSettingsController,
+            appController: appController
         )
         self.appController = appController
         self.integrationSettingsController = integrationSettingsController
